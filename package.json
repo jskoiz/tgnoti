@@ -1,0 +1,49 @@
+{
+  "name": "internoti",
+  "version": "1.0.0",
+  "description": "A notification bridge between Twitter and Telegram",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "NODE_NO_WARNINGS=1 nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write 'src/**/*.ts'",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "test": "jest"
+  },
+  "keywords": [
+    "twitter",
+    "telegram",
+    "notifications",
+    "bot"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "axios": "^1.6.3",
+    "dotenv": "^16.4.7",
+    "inversify": "^6.2.2",
+    "node-telegram-bot-api": "^0.64.0",
+    "nodemon": "^3.0.2",
+    "reflect-metadata": "^0.2.2",
+    "ts-node": "^10.9.2",
+    "twitter-api-v2": "^1.19.1",
+    "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.13.1",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "jest-environment-node": "^29.7.0",
+    "prettier": "^3.1.1",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.2"
+  }
+}
