@@ -24,7 +24,43 @@ jobs:
         
       - name: Create config file
         run: |
-          echo "${{ secrets.CONFIG_JSON }}" > config.json
+          cat > config.json << 'EOL'
+          {
+            "twitter": {
+              "searchQueries": {
+                "381": {
+                  "type": "structured",
+                  "mentions": [
+                    "TrojanOnSolana"
+                  ],
+                  "excludeReplies": false,
+                  "excludeQuotes": true,
+                  "excludeRetweets": true,
+                  "language": "en"
+                },
+                "377": {
+                  "type": "structured",
+                  "accounts": [
+                    "bullx_io",
+                    "TradeonNova",
+                    "BloomTradingBot",
+                    "bonkbot_io",
+                    "gmgnai"
+                  ],
+                  "excludeRetweets": false
+                }
+              },
+              "pollingInterval": 60000,
+              "bearerToken": "${{ secrets.BEARER_TOKEN }}"
+            },
+            "telegram": {
+              "defaultTopicId": "381",
+              "retryAttempts": 3,
+              "botToken": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
+              "groupId": "${{ secrets.TELEGRAM_GROUP_ID }}"
+            }
+          }
+          EOL
           
       - name: Deploy to VPS
         uses: appleboy/ssh-action@master
