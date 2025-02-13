@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
         
+      - name: Build TypeScript
+        run: npm run build
+        
       - name: Create config file
         run: |
           echo "${{ secrets.CONFIG_JSON }}" > config.json
@@ -31,11 +34,11 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             # Stop existing service if running
-            pm2 stop OLD-IMPLEMENTATION || true
+            pm2 stop tgnoti || true
             
             # Create/clear deployment directory
-            mkdir -p /root/OLD-IMPLEMENTATION
-            cd /root/OLD-IMPLEMENTATION
+            mkdir -p /root/tgnoti
+            cd /root/tgnoti
             
             # Remove old files except config and data
             find . -not -name 'config.json' -not -name 'messages.db*' -not -name '.' -not -name '..' -delete
@@ -45,8 +48,8 @@ jobs:
               [ -f "$file" ] && cp "$file" .
             done
             
-            # Install dependencies
+            # Install dependencies and build
             npm ci --production
             
-            # Start service
-            pm2 start index.js --name OLD-IMPLEMENTATION
+            # Start service with the built file
+            pm2 start dist/index.js --name tgnoti
