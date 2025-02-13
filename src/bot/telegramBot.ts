@@ -92,7 +92,8 @@ export class TelegramBot {
         const status = await this.getStatus();
         await this.sendMessage({
           text: `🤖 *System Status*\n${status}`,
-          parse_mode: 'MarkdownV2'
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true
         });
       } catch (error) {
         this.logger.error('Failed to send status', error as Error);
@@ -112,7 +113,8 @@ export class TelegramBot {
 
         await this.sendMessage({
           text: helpText,
-          parse_mode: 'MarkdownV2'
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true
         });
       } catch (error) {
         this.logger.error('Failed to send help', error as Error);
@@ -140,7 +142,8 @@ export class TelegramBot {
         await this.sendMessage({ 
           text: '❌ Failed to fetch affiliated accounts\\. Please try again later\\.',
           parse_mode: 'MarkdownV2',
-          message_thread_id: 5026
+          message_thread_id: 5026,
+          disable_web_page_preview: true
         });
       }
     });
@@ -184,7 +187,8 @@ export class TelegramBot {
             this.logger.debug('Sending text message');
             await this.bot.sendMessage(this.config.groupId, message.text!, {
               parse_mode: message.parse_mode,
-              message_thread_id: messageThreadId
+              message_thread_id: messageThreadId,
+              disable_web_page_preview: message.disable_web_page_preview !== false
             });
           }
           this.logger.debug('Message sent successfully');

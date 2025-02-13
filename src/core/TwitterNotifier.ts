@@ -14,22 +14,17 @@ import path from 'path';
 
 @injectable()
 export class TwitterNotifier {
-  private telegram: TelegramBot;
-  private twitter: TwitterClient;
-  private isRunning: boolean = false;
+  private isRunning = false;
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MessageValidator) private messageValidator: MessageValidator,
-    @inject(TYPES.TelegramBot) telegram: TelegramBot,
-    @inject(TYPES.TwitterClient) twitter: TwitterClient,
+    @inject(TYPES.TelegramBot) private telegram: TelegramBot,
+    @inject(TYPES.TwitterClient) private twitter: TwitterClient,
     @inject(TYPES.Environment) private environment: Environment,
     @inject(TYPES.Storage) private storage: Storage,
     @inject(TYPES.SearchBuilder) private searchBuilder: SearchBuilder
-  ) {
-    this.telegram = telegram;
-    this.twitter = twitter;
-  }
+  ) {}
 
   async initialize(): Promise<void> {
     try {
@@ -57,30 +52,39 @@ export class TwitterNotifier {
     try {
       // Initialize all components first
       await this.initialize();
-      
+
       const config = await this.storage.getConfig();
       this.isRunning = true;
-      
+
       this.logger.info('Twitter Notifier started successfully');
-      await this.telegram.sendMessage(MessageFormatter.formatSystem('Service started'));
-      
+      await this.telegram.sendMessage(
+        MessageFormatter.formatSystem('Service started')
+      );
+
+      // Main polling loop
       while (this.isRunning) {
         await this.processNewTweets();
-        await new Promise(resolve => setTimeout(resolve, config.twitter.pollingInterval));
+        await new Promise(resolve =>
+          setTimeout(resolve, config.twitter.pollingInterval)
+        );
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      this.logger.error('Failed to start Twitter Notifier', new Error(errorMessage));
-      
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error occurred';
+      this.logger.error(
+        'Failed to start Twitter Notifier',
+        new Error(errorMessage)
+      );
+
       // Try to send error notification if telegram is initialized
-      if (this.telegram) {
-        try {
-          await this.telegram.sendMessage(MessageFormatter.formatSystem(`Service error: ${errorMessage}`));
-        } catch (notifyError) {
-          this.logger.error('Failed to send error notification', notifyError as Error);
-        }
+      try {
+        await this.telegram.sendMessage(
+          MessageFormatter.formatSystem(`Service error: ${errorMessage}`)
+        );
+      } catch (notifyError) {
+        this.logger.error('Failed to send error notification', notifyError as Error);
       }
-      
+
       throw error;
     }
   }
@@ -98,6 +102,9 @@ export class TwitterNotifier {
     this.logger.info('Twitter Notifier stopped');
   }
 
+  /**
+   * Converts a SearchQueryConfig to a SearchConfig for the SearchBuilder.
+   */
   private parseQueryConfig(queryConfig: SearchQueryConfig): SearchConfig {
     let config: SearchConfig;
 
@@ -123,39 +130,48 @@ export class TwitterNotifier {
 
       const query = queryConfig.query;
       config.rawQuery = query;
-      
+
       // Extract accounts (from:)
       const accountMatches = query.match(/from:(\w+)/g);
       if (accountMatches) {
         config.accounts = accountMatches.map(m => m.replace('from:', ''));
       }
-      
+
       // Extract mentions (@)
       const mentionMatches = query.match(/@(\w+)/g);
       if (mentionMatches) {
         config.mentions = mentionMatches.map(m => m.replace('@', ''));
       }
-      
+
       // Extract keywords from parentheses groups
       const keywordGroups = query.match(/\(([^)]+)\)/g);
       if (keywordGroups) {
         const lastGroup = keywordGroups[keywordGroups.length - 1];
-        config.keywords = lastGroup.slice(1, -1).split(' OR ').map(k => k.trim());
+        config.keywords = lastGroup
+          .slice(1, -1)
+          .split(' OR ')
+          .map(k => k.trim());
       }
     }
     return config;
   }
 
+  /**
+   * Fetches new tweets from each topic’s query, sends them to Telegram (if not already seen),
+   * and updates lastTweetId in storage.
+   */
   private async processNewTweets(): Promise<void> {
     try {
       const config = await this.storage.getConfig();
       this.logger.debug('Starting tweet processing cycle');
-      
+
       let totalTweetsProcessed = 0;
+
+      // Loop over each configured search query
       for (const [topicId, topic] of Object.entries<SearchQueryConfig>(config.twitter.searchQueries)) {
         const searchConfig = this.parseQueryConfig(topic);
         const query = this.searchBuilder.buildQuery(searchConfig);
-        
+
         if (!query) {
           this.logger.warn(`Empty query for topic ${this.getTopicName(topicId)}`);
           continue;
@@ -163,45 +179,58 @@ export class TwitterNotifier {
 
         this.logger.debug(`Searching tweets for ${this.getTopicName(topicId)}`);
         const tweets = await this.twitter.searchTweets(query, searchConfig);
-        
+
         if (tweets.length > 0) {
           this.logger.debug(`Found ${tweets.length} new tweets for ${this.getTopicName(topicId)}`);
         }
 
+        // Process each tweet
         for (const tweet of tweets) {
-          // Check if tweet has been seen for this specific topic
+          // Only proceed if this tweet hasn't been sent in THIS topic
           if (!await this.storage.hasSeen(tweet.id, topicId)) {
-            // For mention monitor (382), validate explicit mentions
-            if (topicId === '381' && !this.messageValidator.validateTweet(tweet, true, 
-                searchConfig.mentions || ['TrojanOnSolana'])) {
+            // For mention monitor (381), ensure we have an explicit mention
+            if (
+              topicId === '381' &&
+              !this.messageValidator.validateTweet(
+                tweet,
+                true,
+                searchConfig.mentions || ['TrojanOnSolana']
+              )
+            ) {
               this.logger.debug(`Skipping tweet ${tweet.id} - no explicit mention`);
-              await this.storage.markSeen(tweet.id, topicId);
               continue;
             }
-            
-            this.logger.debug(`Processing tweet for ${this.getTopicName(topicId)}`);
+
+            // Send message to Telegram
+            this.logger.debug(`Sending tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
             await this.telegram.sendMessage(MessageFormatter.formatTweet(tweet, topicId));
-            await this.storage.markSeen(tweet.id, topicId);
             totalTweetsProcessed++;
+
+            // Mark tweet as seen for this topic
+            await this.storage.markSeen(tweet.id, topicId);
           }
         }
 
-        // Update last tweet ID if we got any tweets
+        // Update last tweet ID if any tweets were found
         if (tweets.length > 0) {
           await this.storage.updateLastTweetId(topicId, tweets[0].id);
         }
       }
-      
+
       this.logger.debug(`Processed ${totalTweetsProcessed} new tweets`);
 
-      // Cleanup old tweets periodically
+      // Periodically clean up old records
       await this.storage.cleanup();
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error occurred';
       this.logger.error('Failed to process tweets', new Error(errorMessage));
     }
   }
 
+  /**
+   * Helper to map known topic IDs to human-friendly names.
+   */
   private getTopicName(topicId: string): string {
     switch (topicId) {
       case '381':
