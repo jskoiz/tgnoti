@@ -57,9 +57,6 @@ export class TwitterNotifier {
       this.isRunning = true;
 
       this.logger.info('Twitter Notifier started successfully');
-      await this.telegram.sendMessage(
-        MessageFormatter.formatSystem('Service started')
-      );
 
       // Main polling loop
       while (this.isRunning) {
@@ -75,16 +72,6 @@ export class TwitterNotifier {
         'Failed to start Twitter Notifier',
         new Error(errorMessage)
       );
-
-      // Try to send error notification if telegram is initialized
-      try {
-        await this.telegram.sendMessage(
-          MessageFormatter.formatSystem(`Service error: ${errorMessage}`)
-        );
-      } catch (notifyError) {
-        this.logger.error('Failed to send error notification', notifyError as Error);
-      }
-
       throw error;
     }
   }
@@ -93,7 +80,6 @@ export class TwitterNotifier {
     this.isRunning = false;
     if (this.telegram) {
       try {
-        await this.telegram.sendMessage(MessageFormatter.formatSystem('Service stopping'));
         await this.telegram.stop();
       } catch (error) {
         this.logger.error('Error during shutdown', error as Error);
@@ -157,7 +143,7 @@ export class TwitterNotifier {
   }
 
   /**
-   * Fetches new tweets from each topic’s query, sends them to Telegram (if not already seen),
+   * Fetches new tweets from each topic's query, sends them to Telegram (if not already seen),
    * and updates lastTweetId in storage.
    */
   private async processNewTweets(): Promise<void> {

@@ -7,11 +7,13 @@ import { TwitterClient } from '../twitter/twitterClient.js';
 import { MessageFormatter } from './messageFormatter.js';
 import { ConfigManager } from '../config/ConfigManager.js';
 import { TYPES } from '../types/di.js';
+import os from 'os';
 
 @injectable()
 export class TelegramBot {
   private bot: TelegramBotApi;
   private config: TelegramBotConfig;
+  private startTime: Date;
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -30,6 +32,7 @@ export class TelegramBot {
       botToken, groupId, retryAttempts: 3, defaultTopicId: 'default'
     };
     this.bot = new TelegramBotApi(botToken, { polling: true }); // Start with polling enabled
+    this.startTime = new Date();
   }
 
   async initialize(): Promise<void> {
@@ -91,7 +94,7 @@ export class TelegramBot {
         this.logger.debug('Received /status command');
         const status = await this.getStatus();
         await this.sendMessage({
-          text: `🤖 *System Status*\n${status}`,
+          text: status,
           parse_mode: 'MarkdownV2',
           disable_web_page_preview: true
         });
@@ -149,11 +152,41 @@ export class TelegramBot {
     });
   }
 
+  private getIpAddresses(): string {
+    const interfaces = os.networkInterfaces();
+    const addresses: string[] = [];
+    
+    for (const [name, netInterface] of Object.entries(interfaces)) {
+      if (!netInterface) continue;
+      
+      for (const addr of netInterface) {
+        if (addr.family === 'IPv4' && !addr.internal) {
+          addresses.push(`${name}: ${addr.address}`);
+        }
+      }
+    }
+    
+    return addresses.join('\\, ');
+  }
+
+  private getUptime(): string {
+    const uptime = new Date().getTime() - this.startTime.getTime();
+    const days = Math.floor(uptime / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((uptime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+
   private async getStatus(): Promise<string> {
     const circuitStatus = this.circuitBreaker.getStatus();
     const serviceStatus = !circuitStatus.isOpen ? '🟢 Running' : '🔴 Degraded';
+    const ipAddresses = this.getIpAddresses();
+    const uptime = this.getUptime();
 
     return [
+      '🤖 *System Status*',
+      '',
       '*Monitoring Topics:*',
       '\\- Trojan Monitor \\(381\\)',
       '\\- Competitor Monitor \\(377\\)',
@@ -162,7 +195,9 @@ export class TelegramBot {
       '',
       `*Service Status:* ${serviceStatus}`,
       `*API Health:* ${circuitStatus.failures} recent failures`,
-      '*Last Check:* ' + new Date().toLocaleString()
+      `*Uptime:* ${uptime}`,
+      `*IP Addresses:* ${ipAddresses}`,
+      '*Last Check:* ' + new Date().toLocaleString().replace(/[.]/g, '\\.')
     ].join('\n');
   }
 
