@@ -161,7 +161,7 @@ export class TelegramBot {
       
       for (const addr of netInterface) {
         if (addr.family === 'IPv4' && !addr.internal) {
-          addresses.push(`${name}: ${addr.address}`);
+          addresses.push(`${name}: ${addr.address.replace(/\./g, '\\.')}`);
         }
       }
     }
@@ -197,7 +197,7 @@ export class TelegramBot {
       `*API Health:* ${circuitStatus.failures} recent failures`,
       `*Uptime:* ${uptime}`,
       `*IP Addresses:* ${ipAddresses}`,
-      '*Last Check:* ' + new Date().toLocaleString().replace(/[.]/g, '\\.')
+      '*Last Check:* ' + new Date().toLocaleString().replace(/\./g, '\\.')
     ].join('\n');
   }
 

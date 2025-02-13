@@ -40,6 +40,10 @@ export class TwitterNotifier {
       this.logger.info('Verifying storage...');
       await this.storage.verify();
 
+      // 4. Initialize Telegram bot
+      this.logger.info('Initializing Telegram bot...');
+      await this.telegram.initialize();
+
       this.logger.info('Initialization complete');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
