@@ -94,60 +94,6 @@ export class TwitterNotifier {
   }
 
   /**
-   * Converts a SearchQueryConfig to a SearchConfig for the SearchBuilder.
-   */
-  private parseQueryConfig(queryConfig: SearchQueryConfig): SearchConfig {
-    let config: SearchConfig;
-
-    if (queryConfig.type === 'structured') {
-      // Handle structured config
-      config = {
-        accounts: queryConfig.accounts,
-        mentions: queryConfig.mentions,
-        excludeAccounts: queryConfig.excludeAccounts,
-        excludeQuotes: queryConfig.excludeQuotes,
-        excludeRetweets: queryConfig.excludeRetweets,
-        language: queryConfig.language,
-        keywords: queryConfig.keywords,
-        operator: queryConfig.operator,
-        startTime: queryConfig.startTime
-      };
-    } else {
-      // Handle raw query config
-      config = {
-        excludeRetweets: queryConfig.excludeRetweets,
-        language: queryConfig.language
-      };
-
-      const query = queryConfig.query;
-      config.rawQuery = query;
-
-      // Extract accounts (from:)
-      const accountMatches = query.match(/from:(\w+)/g);
-      if (accountMatches) {
-        config.accounts = accountMatches.map(m => m.replace('from:', ''));
-      }
-
-      // Extract mentions (@)
-      const mentionMatches = query.match(/@(\w+)/g);
-      if (mentionMatches) {
-        config.mentions = mentionMatches.map(m => m.replace('@', ''));
-      }
-
-      // Extract keywords from parentheses groups
-      const keywordGroups = query.match(/\(([^)]+)\)/g);
-      if (keywordGroups) {
-        const lastGroup = keywordGroups[keywordGroups.length - 1];
-        config.keywords = lastGroup
-          .slice(1, -1)
-          .split(' OR ')
-          .map(k => k.trim());
-      }
-    }
-    return config;
-  }
-
-  /**
    * Creates a simplified fallback message format for when the regular format fails
    */
   private createFallbackMessage(tweet: Tweet, topicId: string): FormattedMessage {
@@ -196,7 +142,6 @@ export class TwitterNotifier {
         );
         
         formattedMessage = this.createFallbackMessage(tweet, topicId);
-
       }
       await this.telegram.sendMessage(formattedMessage);
       return true;
@@ -219,56 +164,68 @@ export class TwitterNotifier {
 
       // Loop over each configured search query
       for (const [topicId, topic] of Object.entries<SearchQueryConfig>(config.twitter.searchQueries)) {
-        const searchConfig = this.parseQueryConfig(topic);
-        const query = this.searchBuilder.buildQuery(searchConfig);
+        try {
+          const searchConfig = topic;
+          const query = this.searchBuilder.buildQuery(searchConfig);
 
-        if (!query) {
-          this.logger.warn(`Empty query for topic ${this.getTopicName(topicId)}`);
-          continue;
-        }
-
-        this.logger.debug(`Searching tweets for ${this.getTopicName(topicId)}`);
-        const tweets = await this.twitter.searchTweets(query, searchConfig);
-
-        if (tweets.length > 0) {
-          this.logger.debug(`Found ${tweets.length} new tweets for ${this.getTopicName(topicId)}`);
-        }
-
-        // Process each tweet
-        for (const tweet of tweets) {
-          // Only proceed if this tweet hasn't been sent in THIS topic
-          if (!await this.storage.hasSeen(tweet.id, topicId)) {
-            // For mention monitor (381), ensure we have an explicit mention
-            if (
-              topicId === '381' &&
-              !this.messageValidator.validateTweet(
-                tweet,
-                true,
-                searchConfig.mentions || ['TrojanOnSolana']
-              )
-            ) {
-              this.logger.debug(`Skipping tweet ${tweet.id} - no explicit mention`);
-              continue;
-            }
-
-            // Send message to Telegram
-            this.logger.debug(`Sending tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
-            
-            const sent = await this.sendFormattedTweet(tweet, topicId);
-            if (sent) {
-              totalTweetsProcessed++;
-            } else {
-              this.logger.warn(`Failed to send tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
-            }
-
-            // Mark tweet as seen for this topic
-            await this.storage.markSeen(tweet.id, topicId);
+          if (!query) {
+            this.logger.warn(`Empty query for topic ${this.getTopicName(topicId)}`);
+            continue;
           }
-        }
 
-        // Update last tweet ID if any tweets were found
-        if (tweets.length > 0) {
-          await this.storage.updateLastTweetId(topicId, tweets[0].id);
+          this.logger.debug(`Searching tweets for ${this.getTopicName(topicId)}`);
+          const tweets = await this.twitter.searchTweets(query, searchConfig);
+
+          if (tweets.length > 0) {
+            this.logger.debug(`Found ${tweets.length} new tweets for ${this.getTopicName(topicId)}`);
+          }
+
+          // Process each tweet
+          for (const tweet of tweets) {
+            // Only proceed if this tweet hasn't been sent in THIS topic
+            if (!await this.storage.hasSeen(tweet.id, topicId)) {
+              // For mention monitor (381), ensure we have an explicit mention
+              if (topicId === '381') {
+                let mentions: string[] = ['TrojanOnSolana'];
+                
+                if (searchConfig.type === 'structured') {
+                  mentions = searchConfig.mentions || mentions;
+                } else {
+                  // Extract mentions from raw query
+                  const mentionMatches = searchConfig.query.match(/@(\w+)/g);
+                  if (mentionMatches) {
+                    mentions = mentionMatches.map(m => m.replace('@', ''));
+                  }
+                }
+                
+                if (!this.messageValidator.validateTweet(tweet, true, mentions)) {
+                  this.logger.debug(`Skipping tweet ${tweet.id} - no explicit mention`);
+                  continue;
+                }
+              }
+
+              // Send message to Telegram
+              this.logger.debug(`Sending tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
+              
+              const sent = await this.sendFormattedTweet(tweet, topicId);
+              if (sent) {
+                totalTweetsProcessed++;
+              } else {
+                this.logger.warn(`Failed to send tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
+              }
+
+              // Mark tweet as seen for this topic
+              await this.storage.markSeen(tweet.id, topicId);
+            }
+          }
+
+          // Update last tweet ID if any tweets were found
+          if (tweets.length > 0) {
+            await this.storage.updateLastTweetId(topicId, tweets[0].id);
+          }
+        } catch (error) {
+          this.logger.error(`Error processing topic ${this.getTopicName(topicId)}:`, error as Error);
+          continue;
         }
       }
 

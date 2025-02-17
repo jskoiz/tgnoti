@@ -9,6 +9,7 @@ export const TYPES = {
   TwitterNotifier: Symbol.for('TwitterNotifier'),
   Storage: Symbol.for('Storage'),
   SearchBuilder: Symbol.for('SearchBuilder'),
+  RettiwtSearchBuilder: Symbol.for('RettiwtSearchBuilder'),
 
   // Configuration
   ConfigManager: Symbol.for('ConfigManager'),

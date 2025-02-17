@@ -171,8 +171,11 @@ export class MessageFormatter {
     const escapedUsername = this.escapeMarkdown(tweet.username);
     const escapedCreatedAt = this.escapeMarkdown(tweet.createdAt);
     
-    // Escape the entire tweet text including URLs
-    const escapedText = this.escapeMarkdown(tweet.text);
+    // Process tweet text - URLs are already handled in escapeMarkdown
+    const escapedText = tweet.text
+      .split('\n')
+      .map(line => this.escapeMarkdown(line))
+      .join('\n');
 
     // Escape the tweet URL
     const tweetUrl = this.escapeMarkdown(
@@ -184,7 +187,7 @@ export class MessageFormatter {
       ` ├ @${this.ZERO_WIDTH_SPACE}${escapedUsername} - <b>${escapedCreatedAt}</b>`,
       ` └ <b>Following:</b> ${tweet.followingCount || 0} - <b>Followers:</b> ${tweet.followersCount || 0}`,
       '',
-      ...escapedText.split('\n').map(line => `&gt; ${line}`),
+      ...escapedText.split('\n').map(line => line.trim() ? `&gt; ${line}` : '&gt;'),
       '',
       `<a href="${tweetUrl}">${tweetUrl}</a>`
     ];

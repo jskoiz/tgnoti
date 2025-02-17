@@ -1,12 +1,15 @@
 import { TwitterApi, TweetV2, UserV2, MediaObjectV2 } from 'twitter-api-v2';
-import { Rettiwt, User } from 'rettiwt-api';
+import { Rettiwt, User, Tweet as RettiwtTweet, CursoredData, EApiErrors, EErrorCodes } from 'rettiwt-api';
 import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
 import { MetricsManager } from '../types/metrics.js';
-import { Tweet, SearchConfig, AffiliatedAccount, ExtendedUserV2, TeamMemberResponse, GraphQLVariables, GraphQLFeatures } from '../types/twitter.js';
+import { Tweet as AppTweet, SearchConfig, AffiliatedAccount, ExtendedUserV2, TeamMemberResponse, GraphQLVariables, GraphQLFeatures } from '../types/twitter.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { ConfigManager } from '../config/ConfigManager.js';
 import { TYPES } from '../types/di.js';
+import { RettiwtSearchBuilder } from './rettiwtSearchBuilder.js';
+import { SearchQueryConfig } from '../types/storage.js';
+import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
 import fetch from 'node-fetch';
 
 @injectable()
@@ -20,7 +23,9 @@ export class TwitterClient {
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.ConfigManager) configManager: ConfigManager
+    @inject(TYPES.ConfigManager) configManager: ConfigManager,
+    @inject(TYPES.RettiwtSearchBuilder) private rettiwtSearchBuilder: RettiwtSearchBuilder,
+    @inject(TYPES.RateLimitedQueue) private queue: RateLimitedQueue
   ) {
     this.rettiwtApiKey = configManager.getEnvConfig<string>('RETTIWT_API_KEY');
     this.bearerToken = configManager.getEnvConfig<string>('BEARER_TOKEN');
@@ -29,6 +34,19 @@ export class TwitterClient {
     }
     this.client = new TwitterApi(this.bearerToken);
     this.rettiwt = new Rettiwt({ apiKey: this.rettiwtApiKey });
+
+    // Initialize rate-limited queue with 1 request per second
+    // This is conservative to avoid TOO_MANY_REQUESTS errors
+    this.queue.setRateLimit(1);
+
+    // Configure error handler for Rettiwt
+    this.rettiwt = new Rettiwt({
+      apiKey: this.rettiwtApiKey,
+      errorHandler: {
+        handle: (error) => this.handleRettiwtError(error)
+      },
+      timeout: 10000 // 10 second timeout
+    });
   }
 
   async initialize(): Promise<void> {
@@ -50,6 +68,31 @@ export class TwitterClient {
       }
       throw new Error(`Failed to initialize Twitter client: ${errorMessage}`);
     }
+  }
+
+  private handleRettiwtError(error: unknown): void {
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      
+      // Handle rate limiting
+      if (errorMessage.includes('rate limit') || 
+          errorMessage.includes('429') ||
+          errorMessage === EApiErrors.RATE_LIMIT_EXCEEDED) {
+        this.logger.warn('Rate limit exceeded, reducing request rate');
+        // Reduce rate limit by half
+        this.queue.setRateLimit(0.5); // Reduce to one request every 2 seconds
+        return;
+      }
+
+      // Handle other known errors
+      if (Object.values(EApiErrors).includes(error.message as EApiErrors)) {
+        this.logger.error(`Rettiwt API Error: ${error.message}`);
+        return;
+      }
+    }
+
+    // Log unknown errors
+    this.logger.error('Unknown Rettiwt error:', error instanceof Error ? error : new Error(String(error)));
   }
 
   private handleApiError(error: unknown): never {
@@ -269,67 +312,96 @@ export class TwitterClient {
     throw new Error('All retry attempts failed');
   }
 
-  async searchTweets(query: string, config?: SearchConfig): Promise<Tweet[]> {
+  async searchTweets(query: string, config: SearchQueryConfig): Promise<AppTweet[]> {
     try {
       this.logger.debug(`Executing Twitter search with query: ${query}`);
-      const searchParams: any = {
-        'tweet.fields': ['created_at', 'author_id', 'entities'],
-        'user.fields': ['name', 'username', 'public_metrics'],
-        'media.fields': ['url', 'preview_image_url'],
-        'expansions': ['author_id', 'attachments.media_keys']
+      this.metrics.increment('search.attempt');
+
+      const filter = this.rettiwtSearchBuilder.buildFilter(config);
+      
+      // Create a complete filter object with all properties
+      const completeFilter = {
+        fromUsers: filter.fromUsers,
+        mentions: filter.mentions,
+        keywords: filter.keywords,
+        phrase: filter.phrase,
+        language: filter.language,
+        includeReplies: filter.includeReplies,
+        includeRetweets: filter.includeRetweets,
+        includeQuotes: filter.includeQuotes
       };
+      this.logger.debug(`Using filter: ${JSON.stringify(completeFilter)}`);
 
-      if (config?.startTime) {
-        const date = new Date(config.startTime);
-        searchParams.start_time = date.toISOString();
-      }
+      let searchResult: CursoredData<RettiwtTweet> = { list: [], next: { value: '' } };
+      
+      // Wrap search in queue and add retry logic
+      await this.queue.add(async () => {
+        try {
+          searchResult = await this.circuitBreaker.execute(async () => 
+            this.rettiwt.tweet.search(completeFilter)
+          );
+        } catch (error) {
+          this.handleRettiwtError(error);
+          searchResult = { list: [], next: { value: '' } };
+        }
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 500)); // Increased delay between searches
+      
+      this.logger.debug(`Raw search result: ${JSON.stringify(searchResult)}`);
 
-      const result = await this.circuitBreaker.execute(() => 
-        this.client.v2.search(query, searchParams)
-      );
-
-      if (!result.data || !result.data.data) {
-        this.logger.debug('No tweets found in search result');
+      if (!searchResult?.list) {
+        this.logger.debug('Search returned null or undefined result');
         return [];
       }
 
-      return result.data.data.map((tweet: TweetV2) => {
-        const user = result.includes?.users?.find(u => u.id === tweet.author_id);
-        const media = tweet.attachments?.media_keys?.map(key => 
-          result.includes?.media?.find(m => m.media_key === key)
-        )[0] as MediaObjectV2 | undefined;
+      // The search result has a 'list' property containing the tweets
+      if (!searchResult.list.length) {
+        this.logger.debug('No tweets found in search result');
+        return [];
+      }
+      
+      const tweets = searchResult.list;
+      return tweets.map(tweet => ({
+        id: tweet.id,
+        text: this.processTweetText(tweet),
+        username: tweet.tweetBy.userName,
+        displayName: tweet.tweetBy.fullName,
+        mediaUrl: tweet.media?.[0]?.url,
+        createdAt: tweet.createdAt,
+        followersCount: tweet.tweetBy.followersCount,
+        followingCount: tweet.tweetBy.followingsCount
+      }));
 
-        return {
-          id: tweet.id,
-          text: tweet.text,
-          username: user?.username || '',
-          displayName: user?.name || '',
-          mediaUrl: media?.url || media?.preview_image_url,
-          createdAt: tweet.created_at || new Date().toISOString(),
-          followersCount: user?.public_metrics?.followers_count,
-          followingCount: user?.public_metrics?.following_count
-        };
-      });
-    } catch (error: unknown) {
+    } catch (error) {
       if (error instanceof Error && error.message === 'Circuit breaker is open') {
         this.logger.error('Twitter API is currently unavailable');
         return [];
       }
 
-      if (error instanceof Error && 
-          (error.message.includes('401') || 
-           error.message.includes('403') ||
-           error.message.includes('429'))) {
-        this.handleApiError(error);
-      }
-
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : 'Unknown error occurred';
-      
-      this.logger.error('Failed to search tweets', new Error(errorMessage));
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('Failed to search tweets:', new Error(errorMessage));
+      this.metrics.increment('search.error');
       return [];
     }
+  }
+
+  private processTweetText(tweet: RettiwtTweet): string {
+    let text = tweet.fullText;
+    
+    // Handle mentions from entities
+    if (tweet.entities?.mentionedUsers?.length) {
+      // Sort mentions by length (longest first) to avoid partial replacements
+      const mentions = tweet.entities.mentionedUsers.sort((a, b) => b.length - a.length);
+      
+      for (const mention of mentions) {
+        // Replace both @mention and mention forms
+        const mentionRegex = new RegExp(`@${mention}|${mention}`, 'g');
+        text = text.replace(mentionRegex, `@\u200B${mention}`);
+      }
+    }
+    
+    return text;
   }
 
   getCircuitBreakerStatus(): { failures: number; isOpen: boolean } {

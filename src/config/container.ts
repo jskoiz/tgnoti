@@ -20,6 +20,7 @@ import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SearchBuilder } from '../twitter/searchBuilder.js';
+import { RettiwtSearchBuilder } from '../twitter/rettiwtSearchBuilder.js';
 import { TYPES } from '../types/di.js';
 import { configureAffiliateContainer } from './container.affiliate.js';
 import { TopicManager } from '../bot/TopicManager.js';
@@ -47,6 +48,7 @@ container.bind(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
 container.bind(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
 container.bind(TYPES.Storage).to(Storage).inSingletonScope();
 container.bind(TYPES.SearchBuilder).to(SearchBuilder).inSingletonScope();
+container.bind(TYPES.RettiwtSearchBuilder).to(RettiwtSearchBuilder).inSingletonScope();
 
 // Utils and Services
 container.bind(TYPES.Logger).to(ConsoleLogger).inSingletonScope();
