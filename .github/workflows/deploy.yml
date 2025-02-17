@@ -101,9 +101,11 @@ jobs:
             cd /root/tgnoti
             
             # Create .env file with secrets
+            echo "STAGING_TELEGRAM_BOT_TOKEN=${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}" > .env
             echo "BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}" > .env
             echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
             echo "TELEGRAM_GROUP_ID=${{ secrets.TELEGRAM_GROUP_ID }}" >> .env
+            echo "NODE_ENV=production" >> .env
             
             npm ci --production
             pm2 start dist/index.js --name tgnoti
