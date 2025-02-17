@@ -56,6 +56,7 @@ coverage/
 *.pfx
 *.password
 *secret*
+config.json
 *credential*
 
 # Compressed files

@@ -1,0 +1,32 @@
+{
+  "twitter": {
+    "searchQueries": {
+      "381": {
+        "type": "structured",
+        "mentions": [
+          "example_account"
+        ],
+        "excludeReplies": false,
+        "excludeQuotes": true,
+        "excludeRetweets": true,
+        "language": "en"
+      },
+      "377": {
+        "type": "structured",
+        "accounts": [
+          "example_account1",
+          "example_account2"
+        ],
+        "excludeRetweets": false
+      }
+    },
+    "pollingInterval": 60000,
+    "bearerToken": "YOUR_TWITTER_BEARER_TOKEN"
+  },
+  "telegram": {
+    "defaultTopicId": "381",
+    "retryAttempts": 3,
+    "botToken": "YOUR_TELEGRAM_BOT_TOKEN",
+    "groupId": "YOUR_TELEGRAM_GROUP_ID"
+  }
+}
