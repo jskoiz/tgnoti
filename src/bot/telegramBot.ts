@@ -60,7 +60,8 @@ export class TelegramBot {
           { command: 'track_affiliates', description: 'Start tracking organization affiliates' },
           { command: 'untrack_affiliates', description: 'Stop tracking organization affiliates' },
           { command: 'list_affiliates', description: 'Show current affiliates for an organization' },
-          { command: 'affiliate_status', description: 'Show affiliate tracking status' }
+          { command: 'affiliate_status', description: 'Show affiliate tracking status' },
+          { command: 'user', description: 'Get details about a Twitter user' }
         ]);
         
         this.logger.info('Bot commands registered');
@@ -124,6 +125,7 @@ export class TelegramBot {
           '/status \\- Check system status',
           '/help \\- Show this help message',
           '/track\\_affiliates @org \\- Start tracking organization affiliates',
+          '/user \\[username\\] \\- Get details about a Twitter user',
           '/untrack\\_affiliates @org \\- Stop tracking organization affiliates',
           '/list\\_affiliates @org \\- Show current affiliates for an organization',
           '/affiliate\\_status \\- Show affiliate tracking status',
@@ -248,6 +250,62 @@ export class TelegramBot {
           disable_web_page_preview: true,
           message_thread_id: 5026
         });
+      }
+    });
+
+    this.bot.onText(/\/user (@?\w+)/, async (msg, match) => {
+      if (!match) return;
+      
+      // Remove @ if present
+      const username = match[1].startsWith('@') ? match[1].substring(1) : match[1];
+      
+      try {
+        this.logger.debug(`Fetching user details for ${username}`);
+        const user = await this.twitterClient.getUserDetails(username);
+        
+        if (!user) {
+          await this.sendMessage({
+            text: `❌ User @${username} not found`,
+            parse_mode: 'MarkdownV2',
+            disable_web_page_preview: true,
+            message_thread_id: msg.message_thread_id || undefined
+          });
+          return;
+        }
+        this.logger.debug(`Got user details for ${username}: ${JSON.stringify(user, null, 2)}`);
+
+        // Helper function to escape special characters for MarkdownV2
+        const escapeMarkdown = (text: string) => {
+          return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+        };
+
+        const verifiedBadge = user.isVerified ? '✓ ' : '';
+        const followersCount = user.followersCount.toLocaleString();
+        const followingCount = user.followingsCount.toLocaleString();
+        const tweetsCount = user.statusesCount.toLocaleString();
+        const joinDate = new Date(user.createdAt).toLocaleDateString();
+        
+        const userInfo = [
+          `👤 *${escapeMarkdown(verifiedBadge + user.fullName)}* \\(@${user.userName}\\)`,
+          '',
+          user.description ? `📝 ${escapeMarkdown(user.description)}` : '',
+          '',
+          `📊 *Stats:*`,
+          `\\- Followers: ${escapeMarkdown(followersCount)}`,
+          `\\- Following: ${escapeMarkdown(followingCount)}`,
+          `\\- Tweets: ${escapeMarkdown(tweetsCount)}`,
+          `\\- Joined: ${escapeMarkdown(joinDate)}`,
+        ].join('\n');
+
+        await this.sendMessage({
+          text: userInfo,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: msg.message_thread_id || undefined
+        });
+      } catch (error) {
+        this.logger.error(`Failed to get user details for ${username}`, error as Error);
+        await this.sendMessage({ text: `❌ Failed to get user details\\. Please try again later\\.`, parse_mode: 'MarkdownV2' });
       }
     });
   }

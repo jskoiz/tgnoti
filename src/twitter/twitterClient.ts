@@ -224,6 +224,33 @@ export class TwitterClient {
     }
   }
 
+  async getUserDetails(username: string): Promise<User | null> {
+    try {
+      this.logger.debug(`Fetching user details for: ${username}`);
+      this.metrics.increment('user.details.fetch.attempt');
+      const userDetails = await this.circuitBreaker.execute(() =>
+        this.retryWithBackoff(() => this.rettiwt.user.details(username))
+      );
+      
+      if (!userDetails) {
+        this.logger.debug(`No user found with username: ${username}`);
+        return null;
+      } else {
+        this.logger.debug(`Found user details: ${JSON.stringify(userDetails, null, 2)}`);
+        this.metrics.increment('user.details.fetch.success');
+      }
+      return userDetails;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Circuit breaker is open') {
+        this.logger.error('Twitter API is currently unavailable');
+        throw error;
+      }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to fetch user details for ${username}:`, new Error(errorMessage));
+      return null;
+    }
+  }
+
   private async retryWithBackoff<T>(
     operation: () => Promise<T>,
     maxRetries: number = 3,
