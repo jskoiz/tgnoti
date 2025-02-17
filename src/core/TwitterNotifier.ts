@@ -5,8 +5,9 @@ import { MessageFormatter } from '../bot/messageFormatter.js';
 import { TelegramBot } from '../bot/telegramBot.js';
 import { TwitterClient } from '../twitter/twitterClient.js';
 import { Logger } from '../types/logger.js';
-import { Config, SearchQueryConfig } from '../types/storage.js';
-import { SearchConfig } from '../types/twitter.js';
+import { FormattedMessage } from '../types/telegram.js';
+import { SearchQueryConfig } from '../types/storage.js';
+import { SearchConfig, Tweet } from '../types/twitter.js';
 import { Environment } from '../config/environment.js';
 import { MessageValidator } from '../utils/messageValidator.js';
 import { TYPES } from '../types/di.js';
@@ -147,6 +148,65 @@ export class TwitterNotifier {
   }
 
   /**
+   * Creates a simplified fallback message format for when the regular format fails
+   */
+  private createFallbackMessage(tweet: Tweet, topicId: string): FormattedMessage {
+    try {
+      // Create a minimal format with basic escaping
+      const username = MessageFormatter.escapeMarkdown(tweet.username);
+      const text = MessageFormatter.escapeMarkdown(tweet.text);
+      const tweetUrl = MessageFormatter.escapeMarkdown(
+        `https://twitter.com/${tweet.username}/status/${tweet.id}`
+      );
+
+      return {
+        text: [
+          `Tweet from @${username}:`,
+          text,
+          '',
+          tweetUrl
+        ].join('\n'),
+        parse_mode: 'MarkdownV2',
+        message_thread_id: parseInt(topicId),
+        disable_web_page_preview: true
+      };
+    } catch (error) {
+      // If even the fallback fails, return ultra-safe format
+      return {
+        text: `New tweet from @${tweet.username}: ` +
+          `https://twitter.com/${tweet.username}/status/${tweet.id}`,
+        parse_mode: 'MarkdownV2',
+        message_thread_id: parseInt(topicId),
+        disable_web_page_preview: true
+      };
+    }
+  }
+
+  /**
+   * Attempts to send a formatted tweet message with validation and error recovery
+   */
+  private async sendFormattedTweet(tweet: Tweet, topicId: string): Promise<boolean> {
+    try {
+      let formattedMessage = MessageFormatter.formatTweet(tweet, topicId);
+
+      // Validate message formatting before sending
+      if (!MessageFormatter.validateFormattedMessage(formattedMessage)) {
+        this.logger.warn(
+          `Invalid message formatting detected for tweet ${tweet.id}. Attempting fallback format.`
+        );
+        
+        formattedMessage = this.createFallbackMessage(tweet, topicId);
+
+      }
+      await this.telegram.sendMessage(formattedMessage);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to send formatted tweet ${tweet.id}:`, error as Error);
+      return false;
+    }
+  }
+
+  /**
    * Fetches new tweets from each topic's query, sends them to Telegram (if not already seen),
    * and updates lastTweetId in storage.
    */
@@ -193,8 +253,13 @@ export class TwitterNotifier {
 
             // Send message to Telegram
             this.logger.debug(`Sending tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
-            await this.telegram.sendMessage(MessageFormatter.formatTweet(tweet, topicId));
-            totalTweetsProcessed++;
+            
+            const sent = await this.sendFormattedTweet(tweet, topicId);
+            if (sent) {
+              totalTweetsProcessed++;
+            } else {
+              this.logger.warn(`Failed to send tweet ${tweet.id} for ${this.getTopicName(topicId)}`);
+            }
 
             // Mark tweet as seen for this topic
             await this.storage.markSeen(tweet.id, topicId);

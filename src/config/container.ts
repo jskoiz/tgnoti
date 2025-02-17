@@ -21,6 +21,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { SearchBuilder } from '../twitter/searchBuilder.js';
 import { TYPES } from '../types/di.js';
+import { configureAffiliateContainer } from './container.affiliate.js';
+import { TopicManager } from '../bot/TopicManager.js';
 
 export const container = new Container({ defaultScope: "Singleton" });
 
@@ -51,6 +53,7 @@ container.bind(TYPES.Logger).to(ConsoleLogger).inSingletonScope();
 container.bind(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
 container.bind(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
 container.bind(TYPES.MessageValidator).to(MessageValidator).inSingletonScope();
+container.bind(TYPES.TopicManager).to(TopicManager).inSingletonScope();
 
 // Configure CircuitBreaker with default values
 container.bind(TYPES.CircuitBreaker)
@@ -58,5 +61,15 @@ container.bind(TYPES.CircuitBreaker)
   .inSingletonScope();
 
 container.bind(TYPES.Sanitizer).to(Sanitizer).inSingletonScope();
+
+// Configure Affiliate Services
+const configManager = container.get<ConfigManager>(TYPES.ConfigManager);
+
+// Initialize environment (this will register all validations)
+const environment = container.get<Environment>(TYPES.Environment);
+
+// Get validated API key after environment initialization
+const rettiwtApiKey = configManager.getEnvConfig<string>('RETTIWT_API_KEY');
+configureAffiliateContainer(container, rettiwtApiKey);
 
 export default container;

@@ -1,11 +1,12 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
+import { TYPES } from '../types/di.js';
 
 @injectable()
 export class MetricsManager {
   private metrics: Map<string, number>;
 
-  constructor(private logger: Logger) {
+  constructor(@inject(TYPES.Logger) private logger: Logger) {
     this.metrics = new Map();
   }
 
@@ -21,7 +22,17 @@ export class MetricsManager {
     this.logger.debug(`Metric ${metric} decremented by ${value} to ${currentValue - value}`);
   }
 
-  setValue(metric: string, value: number): void {
+  gauge(metric: string, value: number): void {
+    this.metrics.set(metric, value);
+    this.logger.debug(`Metric ${metric} gauge set to ${value}`);
+  }
+
+  timing(metric: string, value: number): void {
+    this.metrics.set(metric, value);
+    this.logger.debug(`Metric ${metric} timing set to ${value}ms`);
+  }
+
+  private setValue(metric: string, value: number): void {
     this.metrics.set(metric, value);
     this.logger.debug(`Metric ${metric} set to ${value}`);
   }

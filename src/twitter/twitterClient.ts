@@ -1,25 +1,34 @@
 import { TwitterApi, TweetV2, UserV2, MediaObjectV2 } from 'twitter-api-v2';
+import { Rettiwt, User } from 'rettiwt-api';
 import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
-import { Tweet, SearchConfig, AffiliatedAccount, ExtendedUserV2 } from '../types/twitter.js';
+import { MetricsManager } from '../types/metrics.js';
+import { Tweet, SearchConfig, AffiliatedAccount, ExtendedUserV2, TeamMemberResponse, GraphQLVariables, GraphQLFeatures } from '../types/twitter.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { ConfigManager } from '../config/ConfigManager.js';
 import { TYPES } from '../types/di.js';
+import fetch from 'node-fetch';
 
 @injectable()
 export class TwitterClient {
   private client: TwitterApi;
+  private rettiwt: Rettiwt;
+  private bearerToken: string;
+  private rettiwtApiKey: string;
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
+    @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.ConfigManager) configManager: ConfigManager
   ) {
-    const bearerToken = configManager.getEnvConfig<string>('BEARER_TOKEN');
-    if (!bearerToken) {
+    this.rettiwtApiKey = configManager.getEnvConfig<string>('RETTIWT_API_KEY');
+    this.bearerToken = configManager.getEnvConfig<string>('BEARER_TOKEN');
+    if (!this.bearerToken) {
       throw new Error('BEARER_TOKEN environment variable is required');
     }
-    this.client = new TwitterApi(bearerToken);
+    this.client = new TwitterApi(this.bearerToken);
+    this.rettiwt = new Rettiwt({ apiKey: this.rettiwtApiKey });
   }
 
   async initialize(): Promise<void> {
@@ -60,6 +69,177 @@ export class TwitterClient {
     }
 
     throw error instanceof Error ? error : new Error(errorMessage);
+  }
+
+  private convertToAffiliatedAccount(user: User): AffiliatedAccount {
+    return {
+      type: 'organization',
+      id: user.id,
+      username: user.userName,
+      displayName: user.fullName,
+      verified_type: user.isVerified ? 'business' : 'none',
+      subscription_type: 'None',
+      affiliation: {
+        url: '', // No direct URL in User type
+        description: user.description || '',
+        badge_url: user.profileImage || '',
+        user_id: user.id
+      }
+    };
+  }
+
+  private convertTeamMemberToAffiliatedAccount(member: TeamMemberResponse['data']['user']['result']['timeline']['timeline']['instructions'][0]['entries'][0]['content']['itemContent']['user_results']['result']): AffiliatedAccount {
+    return {
+      type: 'team_member',
+      id: member.rest_id,
+      username: member.legacy.screen_name,
+      displayName: member.legacy.name,
+      verified_type: member.legacy.verified_type as 'none' | 'blue' | 'business' | 'government' || 'none',
+      subscription_type: 'None',
+      affiliation: {
+        url: member.affiliates_highlighted_label?.label?.url?.url || '',
+        description: member.legacy.description || '',
+        badge_url: member.legacy.profile_image_url_https || '',
+        user_id: member.rest_id
+      }
+    };
+  }
+
+  private async fetchTeamMembers(userId: string): Promise<TeamMemberResponse> {
+    const variables: GraphQLVariables = {
+      userId,
+      count: 20,
+      teamName: "NotAssigned",
+      includePromotedContent: false,
+      withClientEventToken: false,
+      withVoice: true
+    };
+
+    const features: GraphQLFeatures = {
+      profile_label_improvements_pcf_label_in_post_enabled: true,
+      rweb_tipjar_consumption_enabled: true,
+      responsive_web_graphql_exclude_directive_enabled: true,
+      verified_phone_label_enabled: false,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+      responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+      premium_content_api_read_enabled: false,
+      communities_web_enable_tweet_community_results_fetch: true
+    };
+
+    const queryParams = new URLSearchParams({
+      variables: JSON.stringify(variables),
+      features: JSON.stringify(features)
+    });
+
+    const url = `https://x.com/i/api/graphql/0M9yTHGhZjdIIxIcI9H2xQ/UserBusinessProfileTeamTimeline?${queryParams}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'authorization': `Bearer ${this.bearerToken}`,
+        'content-type': 'application/json',
+        'x-twitter-active-user': 'yes',
+        'x-twitter-auth-type': 'OAuth2Session',
+        'x-twitter-client-language': 'en'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GraphQL request failed: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json() as Promise<TeamMemberResponse>;
+  }
+
+  private extractTeamMembers(response: TeamMemberResponse): AffiliatedAccount[] {
+    const instructions = response.data?.user?.result?.timeline?.timeline?.instructions;
+    if (!instructions?.length) return [];
+
+    return instructions[0].entries
+      .filter(entry => 
+        entry.content?.itemContent?.user_results?.result?.legacy?.screen_name
+      )
+      .map(entry => 
+        this.convertTeamMemberToAffiliatedAccount(entry.content.itemContent.user_results.result)
+      );
+  }
+
+  private async getTeamMembers(userId: string): Promise<AffiliatedAccount[]> {
+    try {
+      const response = await this.circuitBreaker.execute(() => this.fetchTeamMembers(userId));
+      return this.extractTeamMembers(response);
+    } catch (error) {
+      this.logger.error('Failed to fetch team members:', error instanceof Error ? error : new Error(String(error)));
+      return [];
+    }
+  }
+
+  async getAffiliatedAccounts(username: string): Promise<AffiliatedAccount[]> {
+    try {
+      this.logger.debug(`Fetching affiliated accounts for user: ${username}`);
+      this.metrics.increment('affiliate.fetch.attempt');
+      
+      // Get user details using Rettiwt's user service
+      const userDetails = await this.circuitBreaker.execute(() =>
+        this.retryWithBackoff(() => this.rettiwt.user.details(username))
+      );
+
+      if (!userDetails?.id) {
+        this.metrics.increment('affiliate.fetch.error');
+        throw new Error(`User ${username} not found`);
+      }
+
+      // Get organization account
+      const orgAccount = this.convertToAffiliatedAccount(userDetails);
+      
+      // Try to get team members
+      let teamMembers: AffiliatedAccount[] = [];
+      try {
+        this.metrics.increment('affiliate.team_members.fetch.attempt');
+        teamMembers = await this.getTeamMembers(userDetails.id);
+        this.metrics.increment('affiliate.team_members.fetch.success');
+        this.metrics.gauge('affiliate.team_members.count', teamMembers.length);
+      } catch (error) {
+        this.metrics.increment('affiliate.team_members.fetch.error');
+        this.logger.error('Failed to fetch team members, falling back to organization only:', error instanceof Error ? error : new Error(String(error)));
+      }
+
+      // Combine organization and team members
+      const allAccounts = [orgAccount, ...teamMembers];
+      this.metrics.increment('affiliate.fetch.success');
+      this.metrics.gauge('affiliate.accounts.count', allAccounts.length);
+      return allAccounts;
+
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Circuit breaker is open') {
+        this.logger.error('Twitter API is currently unavailable');
+        return [];
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('Failed to fetch affiliated accounts', new Error(errorMessage));
+      this.metrics.increment('affiliate.fetch.error');
+      
+      return [];
+    }
+  }
+
+  private async retryWithBackoff<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        this.logger.debug(`Retry attempt ${attempt} failed, waiting ${delay}ms before next attempt`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    throw new Error('All retry attempts failed');
   }
 
   async searchTweets(query: string, config?: SearchConfig): Promise<Tweet[]> {
@@ -121,95 +301,6 @@ export class TwitterClient {
         : 'Unknown error occurred';
       
       this.logger.error('Failed to search tweets', new Error(errorMessage));
-      return [];
-    }
-  }
-
-  async getAffiliatedAccounts(username: string): Promise<AffiliatedAccount[]> {
-    try {
-      this.logger.debug(`Fetching affiliated accounts for user: ${username}`);
-      
-      // Search for tweets mentioning or interacting with the target account
-      const userFields: string[] = [
-        'name', 'username', 'verified_type', 'subscription_type'
-      ];
-
-      const searchResult = await this.circuitBreaker.execute(() => 
-        this.client.v2.search(`@${username}`, {
-          'tweet.fields': ['author_id', 'created_at'],
-          'user.fields': userFields as any,
-          'expansions': ['author_id'],
-          'max_results': 100
-        })
-      );
-
-      if (!searchResult.data || !searchResult.includes?.users) {
-        this.logger.debug('No interactions found');
-        return [];
-      }
-
-      // Get unique user IDs from the interactions
-      const userIds = [...new Set(searchResult.data.data
-        .map(tweet => tweet.author_id)
-        .filter((id): id is string => id !== undefined))];
-      this.logger.debug(`Found ${userIds.length} unique users interacting with @${username}`);
-
-      // Get detailed user information
-      const detailedUserFields: string[] = [
-        'name', 'username', 'verified_type', 'subscription_type',
-        // Custom fields from the API that need type assertion
-        'affiliation'
-      ];
-
-      const usersResult = await this.circuitBreaker.execute(() => 
-        this.client.v2.users(userIds, {
-          'user.fields': detailedUserFields as any,
-        })
-      );
-
-      if (!usersResult.data) {
-        this.logger.debug('No user details found');
-        return [];
-      }
-
-      // Log raw user data for debugging
-      this.logger.debug(`Raw user data: ${JSON.stringify(usersResult.data, null, 2)}`);
-
-      // Filter for accounts with affiliation badges or verified status
-      const affiliates: AffiliatedAccount[] = usersResult.data
-        .filter((user: ExtendedUserV2) => {
-          const hasAffiliation = user.affiliation?.badge_url;
-          const isVerifiedBusiness = user.verified_type === 'business';
-          const isGovernment = user.verified_type === 'government';
-          
-          if (hasAffiliation || isVerifiedBusiness || isGovernment) {
-            this.logger.debug(`Found affiliated/verified account: ${user.username}`);
-          }
-          
-          return hasAffiliation || isVerifiedBusiness || isGovernment;
-        })
-        .map((user: ExtendedUserV2) => ({
-          id: user.id,
-          username: user.username,
-          displayName: user.name,
-          verified_type: user.verified_type,
-          subscription_type: user.subscription_type,
-          affiliation: user.affiliation || { badge_url: '', description: '' }
-        }));
-      this.logger.debug(`Found ${affiliates.length} affiliated/verified accounts`);
-      this.logger.debug(`Affiliate details: ${JSON.stringify(affiliates, null, 2)}`);
-
-      return affiliates;
-
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'Circuit breaker is open') {
-        this.logger.error('Twitter API is currently unavailable');
-        return [];
-      }
-
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error('Failed to fetch affiliated accounts', new Error(errorMessage));
-      
       return [];
     }
   }

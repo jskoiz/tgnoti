@@ -16,11 +16,20 @@ export const TYPES = {
   TwitterConfigValidator: Symbol.for('TwitterConfigValidator'),
   BasePath: Symbol.for('BasePath'),
 
-  // Utils
+  // Utils and Services
   Logger: Symbol.for('Logger'),
   ErrorHandler: Symbol.for('ErrorHandler'),
   MetricsManager: Symbol.for('MetricsManager'),
-  CircuitBreaker: Symbol.for('CircuitBreaker'),
   MessageValidator: Symbol.for('MessageValidator'),
+  CircuitBreaker: Symbol.for('CircuitBreaker'),
+  TopicManager: Symbol.for('TopicManager'),
   Sanitizer: Symbol.for('Sanitizer'),
+};
+
+export const AFFILIATE_TYPES = {
+  AffiliateMonitor: Symbol.for('AffiliateMonitor'),
+  AffiliateStorage: Symbol.for('AffiliateStorage'),
+  RettiwtClient: Symbol.for('RettiwtClient'),
+  AffiliateConfig: Symbol.for('AffiliateConfig'),
+  AffiliateClient: Symbol.for('AffiliateClient'),
 };

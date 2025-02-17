@@ -6,7 +6,10 @@ import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { TwitterClient } from '../twitter/twitterClient.js';
 import { MessageFormatter } from './messageFormatter.js';
 import { ConfigManager } from '../config/ConfigManager.js';
-import { TYPES } from '../types/di.js';
+import { TYPES, AFFILIATE_TYPES } from '../types/di.js';
+import { IAffiliateMonitor } from '../types/affiliate.js';
+import { Environment } from '../config/environment.js';
+import { TopicManager } from './TopicManager.js';
 import os from 'os';
 
 @injectable()
@@ -19,9 +22,12 @@ export class TelegramBot {
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.TwitterClient) private twitterClient: TwitterClient,
     @inject(TYPES.ConfigManager) configManager: ConfigManager,
-    @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker
+    @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
+    @inject(AFFILIATE_TYPES.AffiliateMonitor) private affiliateMonitor: IAffiliateMonitor,
+    @inject(TYPES.Environment) private environment: Environment,
+    @inject(TYPES.TopicManager) private topicManager: TopicManager
   ) {
-    const botToken = configManager.getEnvConfig<string>('TELEGRAM_BOT_TOKEN');
+    const botToken = this.environment.getTelegramBotToken();
     const groupId = configManager.getEnvConfig<string>('TELEGRAM_GROUP_ID');
     
     if (!botToken || !groupId) {
@@ -31,31 +37,36 @@ export class TelegramBot {
     this.config = {
       botToken, groupId, retryAttempts: 3, defaultTopicId: 'default'
     };
-    this.bot = new TelegramBotApi(botToken, { polling: true }); // Start with polling enabled
+    this.bot = new TelegramBotApi(botToken, { polling: true });
     this.startTime = new Date();
   }
 
   async initialize(): Promise<void> {
     try {
-      // Test bot token validity using circuit breaker
       await this.circuitBreaker.execute(async () => {
+        // Verify bot admin status
+        const isAdmin = await this.verifyBotAdmin();
+        if (!isAdmin) {
+          this.logger.error('Bot is not an admin in the group. Please grant admin privileges.');
+          throw new Error('Bot requires admin privileges');
+        }
+
         const me = await this.bot.getMe();
         this.logger.info(`Connected as @${me.username}`);
         
-        // Register bot commands
         await this.bot.setMyCommands([
           { command: 'status', description: 'Check system status' },
           { command: 'help', description: 'Show help message' },
-          { command: 'affiliate', description: 'Show affiliated accounts for @trojanonsolana' }
+          { command: 'track_affiliates', description: 'Start tracking organization affiliates' },
+          { command: 'untrack_affiliates', description: 'Stop tracking organization affiliates' },
+          { command: 'list_affiliates', description: 'Show current affiliates for an organization' },
+          { command: 'affiliate_status', description: 'Show affiliate tracking status' }
         ]);
         
         this.logger.info('Bot commands registered');
       });
 
-      // Setup error handler
       this.bot.on('polling_error', (error: Error) => this.handlePollingError(error));
-      
-      // Setup commands
       this.setupCommands();
     } catch (error) {
       if (error instanceof Error && error.message === 'Circuit breaker is open') {
@@ -89,6 +100,7 @@ export class TelegramBot {
   }
 
   private setupCommands(): void {
+    // Existing commands
     this.bot.onText(/\/status/, async (msg) => {
       try {
         this.logger.debug('Received /status command');
@@ -111,7 +123,10 @@ export class TelegramBot {
           '',
           '/status \\- Check system status',
           '/help \\- Show this help message',
-          '/affiliate \\- Show affiliated accounts for @trojanonsolana',
+          '/track\\_affiliates @org \\- Start tracking organization affiliates',
+          '/untrack\\_affiliates @org \\- Stop tracking organization affiliates',
+          '/list\\_affiliates @org \\- Show current affiliates for an organization',
+          '/affiliate\\_status \\- Show affiliate tracking status',
         ].join('\n');
 
         await this.sendMessage({
@@ -124,29 +139,114 @@ export class TelegramBot {
       }
     });
 
-    this.bot.onText(/^\/affiliate$/, async (msg) => {
-      this.logger.debug(`Received /affiliate command: ${JSON.stringify(msg)}`);
+    // New affiliate tracking commands
+    this.bot.onText(/\/track_affiliates (@\w+)/, async (msg, match) => {
+      if (!match) return;
+      const orgUsername = match[1].substring(1); // Remove @ symbol
+      
       try {
-        const username = 'trojanonsolana'; // Hardcoded as per requirements
-        this.logger.debug(`Command received from: ${msg.from?.username}`);
-        this.logger.debug(`Fetching affiliates for @${username}`);
-
-        const affiliates = await this.twitterClient.getAffiliatedAccounts(username);
-        const message = MessageFormatter.formatAffiliateList(username, affiliates);
-
-        // Send to topic 5026
+        await this.affiliateMonitor.startMonitoring(orgUsername);
         await this.sendMessage({
-          ...message,
+          text: `✅ Started tracking affiliates for @${orgUsername}`,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
           message_thread_id: 5026
         });
-
       } catch (error) {
-        this.logger.error('Failed to fetch affiliates', error as Error);
-        await this.sendMessage({ 
-          text: '❌ Failed to fetch affiliated accounts\\. Please try again later\\.',
+        this.logger.error(`Failed to start tracking ${orgUsername}`, error as Error);
+        await this.sendMessage({
+          text: `❌ Failed to start tracking @${orgUsername}\\. Error: ${(error as Error).message}`,
           parse_mode: 'MarkdownV2',
-          message_thread_id: 5026,
-          disable_web_page_preview: true
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      }
+    });
+
+    this.bot.onText(/\/untrack_affiliates (@\w+)/, async (msg, match) => {
+      if (!match) return;
+      const orgUsername = match[1].substring(1);
+      
+      try {
+        await this.affiliateMonitor.stopMonitoring(orgUsername);
+        await this.sendMessage({
+          text: `✅ Stopped tracking affiliates for @${orgUsername}`,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      } catch (error) {
+        this.logger.error(`Failed to stop tracking ${orgUsername}`, error as Error);
+        await this.sendMessage({
+          text: `❌ Failed to stop tracking @${orgUsername}\\. Error: ${(error as Error).message}`,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      }
+    });
+
+    this.bot.onText(/\/list_affiliates (@\w+)/, async (msg, match) => {
+      if (!match) return;
+      const orgUsername = match[1].substring(1);
+      
+      try {
+        const result = await this.affiliateMonitor.checkAffiliates(orgUsername);
+        const state = result.cached ? '\\(cached\\)' : '\\(fresh\\)';
+        
+        const affiliates = result.changes?.added || [];
+        const affiliateList = affiliates.length > 0
+          ? affiliates.map(a => `@${a}`).join('\\, ')
+          : 'No affiliates found';
+
+        await this.sendMessage({
+          text: [
+            `🔍 *Affiliates for @${orgUsername}* ${state}`,
+            '',
+            affiliateList
+          ].join('\n'),
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      } catch (error) {
+        this.logger.error(`Failed to list affiliates for ${orgUsername}`, error as Error);
+        await this.sendMessage({
+          text: `❌ Failed to list affiliates for @${orgUsername}\\. Error: ${(error as Error).message}`,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      }
+    });
+
+    this.bot.onText(/\/affiliate_status/, async (msg) => {
+      try {
+        const monitoredOrgs = await this.affiliateMonitor.getMonitoredOrgs();
+        const status = [
+          '📊 *Affiliate Tracking Status*',
+          '',
+          '*Monitored Organizations:*',
+          monitoredOrgs.length > 0
+            ? monitoredOrgs.map(org => `@${org}`).join('\\, ')
+            : 'No organizations currently monitored',
+          '',
+          '*Last Check:* ' + new Date().toLocaleString().replace(/\./g, '\\.')
+        ].join('\n');
+
+        await this.sendMessage({
+          text: status,
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
+        });
+      } catch (error) {
+        this.logger.error('Failed to get affiliate status', error as Error);
+        await this.sendMessage({
+          text: '❌ Failed to get affiliate tracking status\\. Please try again later\\.',
+          parse_mode: 'MarkdownV2',
+          disable_web_page_preview: true,
+          message_thread_id: 5026
         });
       }
     });
@@ -183,6 +283,7 @@ export class TelegramBot {
     const serviceStatus = !circuitStatus.isOpen ? '🟢 Running' : '🔴 Degraded';
     const ipAddresses = this.getIpAddresses();
     const uptime = this.getUptime();
+    const monitoredOrgs = await this.affiliateMonitor.getMonitoredOrgs();
 
     return [
       '🤖 *System Status*',
@@ -192,6 +293,9 @@ export class TelegramBot {
       '\\- Competitor Monitor \\(377\\)',
       '\\- Competition Tweets \\(885\\)',
       '\\- KOL Monitor \\(377\\)',
+      '',
+      '*Affiliate Tracking:*',
+      `\\- Monitored Organizations: ${monitoredOrgs.length}`,
       '',
       `*Service Status:* ${serviceStatus}`,
       `*API Health:* ${circuitStatus.failures} recent failures`,
@@ -204,26 +308,35 @@ export class TelegramBot {
   async sendMessage(message: FormattedMessage): Promise<void> {
     const maxRetries = this.config.retryAttempts;
     let lastError: Error | null = null;
+    
+    try {
+      // Get appropriate topic ID with fallback handling
+      const topicId = await this.topicManager.getTopicId(
+        this.bot,
+        this.config.groupId,
+        (message.message_thread_id || this.config.defaultTopicId).toString()
+      );
 
-    let messageThreadId = message.message_thread_id || parseInt(this.config.defaultTopicId);
+      // Update message with validated topic ID
+      message.message_thread_id = parseInt(topicId);
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.circuitBreaker.execute(async () => {
-          this.logger.debug(`Sending message to group ${this.config.groupId} in topic ${messageThreadId}`);
+          this.logger.debug(`Sending message to group ${this.config.groupId} in topic ${message.message_thread_id}`);
           if (message.photo) {
             this.logger.debug('Sending photo message');
             await this.bot.sendPhoto(this.config.groupId, message.photo, {
               caption: message.caption,
               parse_mode: message.parse_mode,
-              message_thread_id: messageThreadId
+              message_thread_id: message.message_thread_id
             });
           } else {
             this.logger.debug('Sending text message');
             await this.bot.sendMessage(this.config.groupId, message.text!, {
               parse_mode: message.parse_mode,
-              message_thread_id: messageThreadId,
-              disable_web_page_preview: message.disable_web_page_preview !== false
+              message_thread_id: message.message_thread_id,
+              disable_web_page_preview: true
             });
           }
           this.logger.debug('Message sent successfully');
@@ -232,47 +345,52 @@ export class TelegramBot {
       } catch (error: unknown) {
         if (error instanceof Error && error.message === 'Circuit breaker is open') {
           this.logger.error('Telegram API is currently unavailable');
-          throw error; // Propagate circuit breaker error to allow queue retry
+          throw error;
         }
 
         const errorMessage = error instanceof Error 
           ? error.message 
           : 'Unknown error occurred';
         
-        // Check for authentication/permission errors
         if (errorMessage.toLowerCase().includes('unauthorized') || 
             errorMessage.toLowerCase().includes('forbidden')) {
           this.logger.error('Authentication error:', error instanceof Error ? error : new Error(errorMessage));
           process.exit(1);
         }
 
-        // Handle message formatting errors
         if (errorMessage.toLowerCase().includes('can\'t parse entities')) {
           this.logger.error('Message formatting error:', error instanceof Error ? error : new Error(errorMessage));
-          // Don't retry on formatting errors as they will keep failing
           throw error;
         }
 
-        // If topic not found and we're not already using default topic, try with default
-        if (errorMessage.toLowerCase().includes('thread not found') && 
-            messageThreadId !== parseInt(this.config.defaultTopicId)) {
-          this.logger.warn(`Topic ${messageThreadId} not found, falling back to default topic ${this.config.defaultTopicId}`);
-          messageThreadId = parseInt(this.config.defaultTopicId);
-          continue; // Try again with default topic
-        }
         
         lastError = error instanceof Error ? error : new Error(errorMessage);
         this.logger.warn(`Telegram send attempt ${attempt} failed: ${errorMessage}`);
         
         if (attempt < maxRetries) {
-          // Exponential backoff
           const delay = 1000 * Math.pow(2, attempt - 1);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
 
-    this.logger.error(`Failed to send message after ${maxRetries} attempts`, lastError!);
+    throw lastError || new Error('Failed to send message after all retries');
+    } catch (error) {
+      this.logger.error('Failed to send message:', error as Error);
+      throw error;
+    }
+}
+
+  private verifyBotAdmin = async (): Promise<boolean> => {
+    try {
+      const chatAdmins = await this.bot.getChatAdministrators(this.config.groupId);
+      const botInfo = await this.bot.getMe();
+      const botAdmin = chatAdmins.find(admin => admin.user.id === botInfo.id);
+      return !!botAdmin;
+    } catch (error) {
+      this.logger.error('Failed to verify bot admin status:', error instanceof Error ? error : new Error('Unknown error'));
+      return false;
+    }
   }
 
   getCircuitBreakerStatus(): { failures: number; isOpen: boolean } {

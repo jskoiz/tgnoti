@@ -47,9 +47,42 @@ export class Environment {
       ]
     };
 
+    const rettiwtApiKeyValidation: ConfigValidation<string> = {
+      validate: (key: string) => {
+        // Check if it's a valid base64 string
+        try {
+          return /^[A-Za-z0-9+/=]+$/.test(key) && btoa(atob(key)) === key;
+        } catch {
+          return false;
+        }
+      },
+      message: 'Invalid Rettiwt API key format',
+      example: 'a2R0PWs4SHJOQVZ1SnFrRHVWODFGeDNBRFBuVmZTWU12VHZPWEVmZWo1Qjg...',
+      required: [
+        'Must be obtained using the Rettiwt Auth Helper browser extension',
+        'Should be a valid base64-encoded string'
+      ]
+    };
+
+    // Register validation for both production and staging tokens
     this.configManager.registerValidation('TELEGRAM_BOT_TOKEN', telegramTokenValidation);
+    this.configManager.registerValidation('STAGING_TELEGRAM_BOT_TOKEN', {
+      ...telegramTokenValidation,
+      required: [
+        ...telegramTokenValidation.required,
+        'Only used for local development'
+      ]
+    });
+
     this.configManager.registerValidation('TELEGRAM_GROUP_ID', telegramGroupIdValidation);
     this.configManager.registerValidation('BEARER_TOKEN', bearerTokenValidation);
+    this.configManager.registerValidation('RETTIWT_API_KEY', rettiwtApiKeyValidation);
+  }
+
+  getTelegramBotToken(): string {
+    const isProduction = process.env.NODE_ENV?.toLowerCase() === 'production';
+    const token = isProduction ? 'TELEGRAM_BOT_TOKEN' : 'STAGING_TELEGRAM_BOT_TOKEN';
+    return this.configManager.getEnvConfig<string>(token);
   }
 
   validateEnvironment(): void {

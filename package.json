@@ -24,12 +24,16 @@
   "license": "ISC",
   "dependencies": {
     "@types/node-telegram-bot-api": "^0.64.7",
+    "@types/sqlite3": "^5.1.0",
     "axios": "^1.6.3",
     "dotenv": "^16.4.7",
     "inversify": "^6.2.2",
+    "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.64.0",
     "nodemon": "^3.0.2",
     "reflect-metadata": "^0.2.2",
+    "rettiwt-api": "^4.2.0",
+    "sqlite3": "^5.1.7",
     "ts-node": "^10.9.2",
     "twitter-api-v2": "^1.19.1",
     "typescript": "^5.3.3"
