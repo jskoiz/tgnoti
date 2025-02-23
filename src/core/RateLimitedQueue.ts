@@ -16,6 +16,8 @@ export class RateLimitedQueue {
   private processing: boolean = false;
   private requestsPerSecond: number = 1;
   private lastProcessTime: number;
+  private lastHeartbeat: number;
+  private readonly TASK_TIMEOUT = 30000; // 30 second task timeout
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -25,11 +27,13 @@ export class RateLimitedQueue {
     this.processing = false;
     this.requestsPerSecond = 1; // Default rate limit
     this.lastProcessTime = Date.now();
+    this.lastHeartbeat = Date.now();
   }
 
   async initialize(): Promise<void> {
     this.logger.info('Initializing rate-limited queue');
     this.startProcessing(); // Launch processing in the background
+    this.startHeartbeat(); // Start heartbeat monitoring
     return Promise.resolve();
   }
 
@@ -39,6 +43,12 @@ export class RateLimitedQueue {
   async add<T>(task: QueueTask<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const wrappedTask = async () => {
+        // Check if queue is healthy
+        if (Date.now() - this.lastHeartbeat > 5000) { // 5 seconds
+          this.logger.error('Queue heartbeat missing, restarting processor');
+          this.startProcessing();
+        }
+
         try {
           const result = await task();
           resolve(result);
@@ -46,7 +56,7 @@ export class RateLimitedQueue {
         } catch (error) {
           const queueError: QueueError = error instanceof Error ? error : new Error(String(error));
           reject(queueError);
-          throw queueError;
+          return; // Don't throw after reject to avoid unhandled rejection
         }
       };
       this.queue.push(wrappedTask);
@@ -81,8 +91,24 @@ export class RateLimitedQueue {
             );
           }
 
-          await task();
+          const taskPromise = task();
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Task timeout exceeded')), this.TASK_TIMEOUT);
+          });
+
+          try {
+            await Promise.race([taskPromise, timeoutPromise]);
+          } catch (error) {
+            if (error instanceof Error && error.message === 'Task timeout exceeded') {
+              this.logger.error('Queue task timed out');
+              this.metrics.increment('queue.tasks.timeout');
+              continue;
+            }
+            throw error;
+          }
+
           this.lastProcessTime = Date.now();
+          this.lastHeartbeat = Date.now();
           this.metrics.increment('queue.tasks.processed');
         } catch (error) {
           const queueError: QueueError = error instanceof Error ? error : new Error(String(error));
@@ -93,8 +119,24 @@ export class RateLimitedQueue {
     })();
   }
 
+  private startHeartbeat(): void {
+    setInterval(() => {
+      const now = Date.now();
+      const timeSinceHeartbeat = now - this.lastHeartbeat;
+      
+      this.logger.debug('Queue heartbeat', {
+        queueSize: this.queue.length,
+        timeSinceLastProcess: now - this.lastProcessTime,
+        timeSinceHeartbeat,
+        isProcessing: this.processing
+      });
+
+    }, 1000); // Check every second
+  }
+
   stop(): void {
     this.processing = false;
+    this.queue = [];
     this.logger.info('Stopping rate-limited queue');
   }
 }

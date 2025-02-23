@@ -50,7 +50,13 @@ export class RettiwtKeyManager {
       throw new Error('No Rettiwt API keys available');
     }
 
-    this.logger.info(`Initialized with ${this.apiKeys.length} API keys`);
+    // Enhanced initialization logging
+    this.logger.info('Initializing API keys', {
+      totalKeys: this.apiKeys.length,
+      currentKeyIndex: this.currentKeyIndex,
+      keyLengths: this.apiKeys.map(k => k.length),
+      keyPrefixes: this.apiKeys.map(k => k.substring(0, 4))
+    });
     
     // Initialize health tracking for each key
     this.apiKeys.forEach(key => {
@@ -64,7 +70,19 @@ export class RettiwtKeyManager {
     if (this.apiKeys.length === 0) {
       throw new Error('No API keys available');
     }
+    
+    // Add debug logging
+    this.logger.debug('Getting current key', {
+      currentKeyIndex: this.currentKeyIndex,
+      totalKeys: this.apiKeys.length,
+      keyExists: this.currentKeyIndex < this.apiKeys.length
+    });
+    
     return this.apiKeys[this.currentKeyIndex];
+  }
+
+  public getCurrentKeyIndex(): number {
+    return this.currentKeyIndex;
   }
 
   private initKeyHealth(): KeyHealth {
@@ -103,6 +121,13 @@ export class RettiwtKeyManager {
 
     this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
     this.lastRotation = Date.now();
+
+    // Add rotation validation
+    if (this.currentKeyIndex >= this.apiKeys.length) {
+      this.logger.error('Invalid key index after rotation', { currentKeyIndex: this.currentKeyIndex, totalKeys: this.apiKeys.length });
+      this.currentKeyIndex = 0;
+      this.metrics.increment('twitter.key.index_reset');
+    }
     
     this.logger.debug(`Rotated to API key ${this.currentKeyIndex + 1} of ${this.apiKeys.length}`);
     return this.getCurrentKey();

@@ -100,13 +100,10 @@ export type SendMessageResult = {
 
 export interface TopicConfig {
   id: string;
+  name: string;
   fallbackId?: string;
   isRequired?: boolean;
 }
 
-export const TOPIC_CONFIG: Record<string, TopicConfig> = {
-  GENERAL: {
-    id: "1", // Default general topic ID
-    isRequired: true
-  }
-};
+// Topic configuration moved to src/config/topicConfig.ts
+export { TOPIC_CONFIG } from '../config/topicConfig.js';

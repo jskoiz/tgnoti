@@ -1,29 +1,48 @@
 export const TYPES = {
+  // Core Services
   Logger: Symbol.for('Logger'),
+  ConfigManager: Symbol.for('ConfigManager'),
+  Storage: Symbol.for('Storage'),
+  DatabaseManager: Symbol.for('DatabaseManager'),
+  ErrorHandler: Symbol.for('ErrorHandler'),
+  CircuitBreaker: Symbol.for('CircuitBreaker'),
+  CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
+  MetricsManager: Symbol.for('MetricsManager'),
+  
+  // Twitter Related
   TwitterClient: Symbol.for('TwitterClient'),
+  TwitterNotifier: Symbol.for('TwitterNotifier'),
   RettiwtSearchBuilder: Symbol.for('RettiwtSearchBuilder'),
+  RettiwtKeyManager: Symbol.for('RettiwtKeyManager'),
   SearchStrategy: Symbol.for('SearchStrategy'),
   SearchCacheManager: Symbol.for('SearchCacheManager'),
-  MetricsManager: Symbol.for('MetricsManager'),
-  RateLimitedQueue: Symbol.for('RateLimitedQueue'),
-  ConfigManager: Symbol.for('ConfigManager'),
-  CircuitBreaker: Symbol.for('CircuitBreaker'),
-  ErrorHandler: Symbol.for('ErrorHandler'),
-  TwitterNotifier: Symbol.for('TwitterNotifier'),
-  TelegramBot: Symbol.for('TelegramBot'),
-  TopicManager: Symbol.for('TopicManager'),
-  MessageStorage: Symbol.for('MessageStorage'),
-  Environment: Symbol.for('Environment'),
-  Storage: Symbol.for('Storage'),
-  TweetFormatter: Symbol.for('TweetFormatter'),
-  DateValidator: Symbol.for('DateValidator'),
   TweetProcessor: Symbol.for('TweetProcessor'),
-  RettiwtKeyManager: Symbol.for('RettiwtKeyManager'),
-  SearchConfig: Symbol.for('SearchConfig'),
-  BasePath: Symbol.for('BasePath'),
-  // Add new types
+  TweetMonitor: Symbol.for('TweetMonitor'),
+  TweetFormatter: Symbol.for('TweetFormatter'),
+  
+  // Telegram Related
+  TelegramBot: Symbol.for('TelegramBot'),
   TelegramMessageQueue: Symbol.for('TelegramMessageQueue'),
+  TelegramMessageSender: Symbol.for('TelegramMessageSender'),
   TelegramQueueConfig: Symbol.for('TelegramQueueConfig'),
+  
+  // Message Processing
+  MessageProcessor: Symbol.for('MessageProcessor'),
+  MessageValidator: Symbol.for('MessageValidator'),
+  MessageFormatter: Symbol.for('MessageFormatter'),
   FilterPipeline: Symbol.for('FilterPipeline'),
-  TelegramMessageSender: Symbol.for('TelegramMessageSender')
+  MessageStorage: Symbol.for('MessageStorage'),
+  
+  // Topic Management
+  TopicManager: Symbol.for('TopicManager'),
+  TopicFilterManager: Symbol.for('TopicFilterManager'),
+  
+  // Configuration
+  Environment: Symbol.for('Environment'),
+  SearchConfig: Symbol.for('SearchConfig'),
+  DateValidator: Symbol.for('DateValidator'),
+  
+  // System
+  BasePath: Symbol.for('BasePath'),
+  RateLimitedQueue: Symbol.for('RateLimitedQueue')
 };

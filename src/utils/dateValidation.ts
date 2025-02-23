@@ -43,6 +43,7 @@ export class DateValidator implements IDateValidator {
   // Internal method for getting online time
   private async getOnlineTime(): Promise<Date> {
     const CACHE_DURATION = 60000; // 1 minute cache
+    const REQUEST_TIMEOUT = 3000; // 3 second timeout
 
     // Return cached time if valid
     if (this.cachedOnlineTime && 
@@ -51,29 +52,25 @@ export class DateValidator implements IDateValidator {
     }
 
     try {
-      // Try multiple time APIs for redundancy
-      const apis = [
-        'http://worldtimeapi.org/api/ip',
-        'https://timeapi.io/api/Time/current/zone?timeZone=UTC'
-      ];
-
-      for (const api of apis) {
-        try {
-          const response = await axios.get(api);
-          const onlineTime = new Date(response.data.datetime || response.data.dateTime);
-          this.cachedOnlineTime = { timestamp: Date.now(), date: onlineTime };
-          return onlineTime;
-        } catch (error) {
-          continue; // Try next API if this one fails
-        }
+      // Try primary time API with timeout
+      try {
+        const response = await axios.get('http://worldtimeapi.org/api/ip', {
+          timeout: REQUEST_TIMEOUT
+        });
+        const onlineTime = new Date(response.data.datetime);
+        this.cachedOnlineTime = { timestamp: Date.now(), date: onlineTime };
+        return onlineTime;
+      } catch (error) {
+        this.logger.warn('Primary time API failed, falling back to system time');
+        const systemTime = new Date();
+        this.cachedOnlineTime = { timestamp: Date.now(), date: systemTime };
+        return systemTime;
       }
-
-      // If all APIs fail, fall back to system time
-      this.logger.warn('All time APIs failed, falling back to system time');
-      return new Date();
     } catch (error) {
       this.logger.warn('Failed to get online time, falling back to system time');
-      return new Date();
+      const systemTime = new Date();
+      this.cachedOnlineTime = { timestamp: Date.now(), date: systemTime };
+      return systemTime;
     }
   }
 

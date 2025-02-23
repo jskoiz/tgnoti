@@ -11,6 +11,7 @@ import { TopicManager } from './TopicManager.js';
 import { MessageStorage, StoredMessage } from '../types/messageStorage.js';
 import { Tweet } from '../types/twitter.js';
 import { ITelegramMessageSender } from '../telegram/TelegramMessageSender.js';
+import { TopicFilterManager } from './TopicFilterManager.js';
 import os from 'os';
 import fs from 'fs';
 
@@ -32,7 +33,8 @@ export class TelegramBot {
     @inject(TYPES.MessageStorage) private messageStorage: MessageStorage,
     @inject(TYPES.TweetFormatter) private tweetFormatter: TweetFormatter,
     @inject(TYPES.TelegramMessageQueue) private messageQueue: ITelegramMessageQueue,
-    @inject(TYPES.TelegramMessageSender) private messageSender: ITelegramMessageSender
+    @inject(TYPES.TelegramMessageSender) private messageSender: ITelegramMessageSender,
+    @inject(TYPES.TopicFilterManager) private topicFilterManager: TopicFilterManager
   ) {
     const envConfig = this.environment.getConfig();
     
@@ -113,7 +115,14 @@ export class TelegramBot {
         await this.bot.setMyCommands([
           { command: 'status', description: 'Check system status' },
           { command: 'help', description: 'Show help message' },
-          { command: 'user', description: 'Get details about a Twitter user' }
+          { command: 'user', description: 'Get details about a Twitter user' },
+          { command: 'filter_list', description: 'Show current filters for this topic' },
+          { command: 'filter_add_user', description: 'Add tweets from a user' },
+          { command: 'filter_add_mention', description: 'Add tweets mentioning a user' },
+          { command: 'filter_add_keyword', description: 'Add tweets containing keyword' },
+          { command: 'filter_remove_user', description: 'Remove user filter' },
+          { command: 'filter_remove_mention', description: 'Remove mention filter' },
+          { command: 'filter_remove_keyword', description: 'Remove keyword filter' }
         ]);
         
         this.logger.info('Bot commands registered');
@@ -207,9 +216,21 @@ export class TelegramBot {
         const helpText = [
           '*Available Commands*',
           '',
+          '*General Commands:*',
           '/status \\- Check system status',
           '/help \\- Show this help message',
           '/user \\[username\\] \\- Get details about a Twitter user',
+          '',
+          '*Filter Management:*',
+          '/filter\\_list \\- Show current filters for this topic',
+          '/filter\\_add\\_user @username \\- Add tweets from a user',
+          '/filter\\_add\\_mention @username \\- Add tweets mentioning a user',
+          '/filter\\_add\\_keyword word \\- Add tweets containing keyword',
+          '/filter\\_remove\\_user @username \\- Remove user filter',
+          '/filter\\_remove\\_mention @username \\- Remove mention filter',
+          '/filter\\_remove\\_keyword word \\- Remove keyword filter',
+          '',
+          '*Note:* Filter commands only work in topics\\.'
         ].join('\n');
 
         await this.queueMessage({
@@ -274,6 +295,149 @@ export class TelegramBot {
         await this.queueMessage({ text: `❌ Failed to get user details\\. Please try again later\\.`, parse_mode: 'MarkdownV2' });
       }
     });
+
+    // Filter management commands
+    this.bot.onText(/\/filter_list/, async (msg) => {
+      try {
+        if (!msg.message_thread_id) {
+          await this.queueMessage({
+            text: '❌ This command must be used in a topic',
+            parse_mode: 'HTML'
+          });
+          return;
+        }
+
+        const filters = await this.topicFilterManager.listFilters(msg.message_thread_id);
+        await this.queueMessage({
+          text: `📋 *Current Filters*\n\n${filters}`,
+          parse_mode: 'MarkdownV2',
+          message_thread_id: msg.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error('Failed to list filters', error as Error);
+        await this.queueMessage({
+          text: '❌ Failed to list filters. Please try again later.',
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      }
+    });
+
+    this.bot.onText(/\/filter_add_user (@?\w+)/, async (msg, match) => {
+      if (!match || !msg.message_thread_id || !msg.from?.id) return;
+      
+      const username = match[1];
+      try {
+        const result = await this.topicFilterManager.addFilter(
+          msg.message_thread_id,
+          { type: 'user', value: username },
+          msg.from.id
+        );
+
+        await this.queueMessage({
+          text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error('Failed to add user filter', error as Error);
+        await this.queueMessage({
+          text: '❌ Failed to add user filter. Please try again later.',
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      }
+    });
+
+    this.bot.onText(/\/filter_add_mention (@?\w+)/, async (msg, match) => {
+      if (!match || !msg.message_thread_id || !msg.from?.id) return;
+      
+      const username = match[1];
+      try {
+        const result = await this.topicFilterManager.addFilter(
+          msg.message_thread_id,
+          { type: 'mention', value: username },
+          msg.from.id
+        );
+
+        await this.queueMessage({
+          text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error('Failed to add mention filter', error as Error);
+        await this.queueMessage({
+          text: '❌ Failed to add mention filter. Please try again later.',
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      }
+    });
+
+    this.bot.onText(/\/filter_add_keyword (.+)/, async (msg, match) => {
+      if (!match || !msg.message_thread_id || !msg.from?.id) return;
+      
+      const keyword = match[1];
+      try {
+        const result = await this.topicFilterManager.addFilter(
+          msg.message_thread_id,
+          { type: 'keyword', value: keyword },
+          msg.from.id
+        );
+
+        await this.queueMessage({
+          text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error('Failed to add keyword filter', error as Error);
+        await this.queueMessage({
+          text: '❌ Failed to add keyword filter. Please try again later.',
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      }
+    });
+
+    // Remove filter commands
+    const removeFilterHandler = async (
+      msg: TelegramMessage,
+      match: RegExpExecArray | null,
+      type: 'user' | 'mention' | 'keyword'
+    ) => {
+      if (!match || !msg.message_thread_id || !msg.from?.id) return;
+      
+      const value = match[1];
+      try {
+        const result = await this.topicFilterManager.removeFilter(
+          msg.message_thread_id,
+          { type, value },
+          msg.from.id
+        );
+
+        await this.queueMessage({
+          text: result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error(`Failed to remove ${type} filter`, error as Error);
+        await this.queueMessage({
+          text: `❌ Failed to remove ${type} filter. Please try again later.`,
+          parse_mode: 'HTML',
+          message_thread_id: msg.message_thread_id
+        });
+      }
+    };
+
+    this.bot.onText(/\/filter_remove_user (@?\w+)/, (msg, match) => 
+      removeFilterHandler(msg, match, 'user'));
+    this.bot.onText(/\/filter_remove_mention (@?\w+)/, (msg, match) => 
+      removeFilterHandler(msg, match, 'mention'));
+    this.bot.onText(/\/filter_remove_keyword (.+)/, (msg, match) => 
+      removeFilterHandler(msg, match, 'keyword'));
   }
 
   private getIpAddresses(): string {

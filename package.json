@@ -27,6 +27,7 @@
     "@types/node-telegram-bot-api": "^0.64.7",
     "@types/sqlite3": "^5.1.0",
     "axios": "^1.6.3",
+    "chalk": "^5.4.1",
     "dotenv": "^16.4.7",
     "grammy": "^1.35.0",
     "inversify": "^6.2.2",

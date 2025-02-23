@@ -1,32 +1,24 @@
 # Dependencies
 node_modules/
+.pnp
+.pnp.js
 
-# Build output
-dist/
+# Testing
+coverage/
+
+# Production
 build/
-out/
+dist/
 
-# Runtime data
-*.pid
-*.seed
-*.pid.lock
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# Environment variables
+# Misc
+.DS_Store
 .env
-.env.*
 .env.local
-.env.*.local
-vps.env
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
+.env.development.local
+.env.test.local
+.env.production.local
+*.log
+.cache_ggshield
 
 # IDE
 .idea/
@@ -34,31 +26,10 @@ vps.env
 *.swp
 *.swo
 
-# System Files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# Test coverage
-coverage/
-.nyc_output/
-
-# Secrets - never commit these!
-*.pem
-*.key
-*.cert
-*.crt
-*.p12
-*.pfx
-*.password
-*secret*
+# Project specific
+cline_docs/
+*_followers_*.json
+lastTweetId.json
+seenTweets.json
 config.json
-*credential*
-
-# Compressed files
-*.tar.gz
-*.zip
+config.*.json

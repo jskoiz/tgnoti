@@ -1,122 +1,126 @@
 import { Container } from 'inversify';
 import { TYPES } from '../types/di.js';
+import { TweetFormatter } from '../types/telegram.js';
+import { SearchConfig } from './searchConfig.js';
+import { Environment } from './environment.js';
+import { FileMessageStorage } from '../storage/messageStorage.js';
+import { MessageStorage } from '../types/messageStorage.js';
+import { CircuitBreakerConfig } from '../types/monitoring.js';
 import { Logger } from '../types/logger.js';
-import { ConsoleLogger } from '../utils/logger.js';
+import { Storage } from '../storage/storage.js';
+import { DatabaseManager } from '../storage/DatabaseManager.js';
+import { ConfigManager } from './ConfigManager.js';
 import { TwitterClient } from '../twitter/twitterClient.js';
 import { RettiwtSearchBuilder } from '../twitter/rettiwtSearchBuilder.js';
 import { SearchStrategy } from '../twitter/searchStrategy.js';
 import { SearchCacheManager } from '../twitter/SearchCacheManager.js';
-import { MetricsManager } from '../utils/MetricsManager.js';
-import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
-import { ConfigManager } from './ConfigManager.js';
-import { CircuitBreaker } from '../utils/circuitBreaker.js';
-import { ErrorHandler } from '../utils/ErrorHandler.js';
-import { TwitterNotifier } from '../core/TwitterNotifier.js';
+import { TweetProcessor } from '../core/TweetProcessor.js';
+import { TweetMonitor } from '../core/TweetMonitor.js';
+import { MessageProcessor } from '../core/MessageProcessor.js';
 import { TelegramBot } from '../bot/telegramBot.js';
 import { TopicManager } from '../bot/TopicManager.js';
-import { FileMessageStorage } from '../storage/messageStorage.js';
-import { Environment } from './environment.js';
-import { Storage } from '../storage/storage.js';
-import { EnhancedMessageFormatter } from '../bot/messageFormatter.js';
-import { DateValidator } from '../utils/dateValidation.js';
-import { TweetProcessor } from '../core/TweetProcessor.js';
+import { TopicFilterManager } from '../bot/TopicFilterManager.js';
 import { RettiwtKeyManager } from '../twitter/rettiwtKeyManager.js';
-import { SearchConfig } from '../config/searchConfig.js';
+import { ErrorHandler } from '../utils/ErrorHandler.js';
+import { CircuitBreaker } from '../utils/circuitBreaker.js';
+import { MessageValidator } from '../utils/messageValidator.js';
+import { EnhancedMessageFormatter } from '../bot/messageFormatter.js';
 import { TelegramMessageQueue } from '../telegram/TelegramMessageQueue.js';
 import { TelegramMessageSender } from '../telegram/TelegramMessageSender.js';
-import { TelegramQueueConfig } from '../types/telegram.js';
+import { MetricsManager } from '../utils/MetricsManager.js';
+import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
+import { FilterPipeline } from '../core/FilterPipeline.js';
+import { TwitterNotifier } from '../core/TwitterNotifier.js';
+import { DateValidator } from '../utils/dateValidation.js';
 import TelegramBotApi from 'node-telegram-bot-api';
+import { TelegramQueueConfig } from '../types/telegram.js';
+import path from 'path';
 
-export async function initializeContainer(): Promise<Container> {
+export function createContainer(): Container {
   const container = new Container();
 
-  // Core services
-  // Bind base path
+  // System
   container.bind<string>(TYPES.BasePath).toConstantValue(process.cwd());
+  container.bind<Logger>(TYPES.Logger).toConstantValue(console);
 
-  container.bind<Logger>(TYPES.Logger).to(ConsoleLogger).inSingletonScope();
-  const logger = container.get<Logger>(TYPES.Logger);
-
-  // Initialize ConfigManager first
+  // Core Services
   container.bind<ConfigManager>(TYPES.ConfigManager).to(ConfigManager).inSingletonScope();
-  const configManager = container.get<ConfigManager>(TYPES.ConfigManager);
-  configManager.initialize();
-
-  // Initialize remaining core services
-  container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
-  container.bind<CircuitBreaker>(TYPES.CircuitBreaker)
-    .toDynamicValue((context) => {
-      const logger = context.container.get<Logger>(TYPES.Logger);
-      return new CircuitBreaker(logger);
-    })
-    .inSingletonScope();
-  container.bind<ErrorHandler>(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
   container.bind<Environment>(TYPES.Environment).to(Environment).inSingletonScope();
-  container.bind<DateValidator>(TYPES.DateValidator).to(DateValidator).inSingletonScope();
   container.bind<SearchConfig>(TYPES.SearchConfig).to(SearchConfig).inSingletonScope();
+  container.bind<Storage>(TYPES.Storage).to(Storage).inSingletonScope();
+  container.bind<DatabaseManager>(TYPES.DatabaseManager).to(DatabaseManager).inSingletonScope();
+  container.bind<MessageStorage>(TYPES.MessageStorage).to(FileMessageStorage).inSingletonScope();
+  container.bind<CircuitBreakerConfig>(TYPES.CircuitBreakerConfig).toConstantValue({
+    threshold: 5,
+    resetTimeout: 30000, // 30 seconds
+    testInterval: 5000   // 5 seconds
+  });
+  container.bind<ErrorHandler>(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
+  container.bind<CircuitBreaker>(TYPES.CircuitBreaker).to(CircuitBreaker).inSingletonScope();
+  container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
+  container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
+
+  // Twitter Related
+  container.bind<TwitterClient>(TYPES.TwitterClient).to(TwitterClient).inSingletonScope();
+  container.bind<RettiwtSearchBuilder>(TYPES.RettiwtSearchBuilder).to(RettiwtSearchBuilder).inSingletonScope();
+  container.bind<SearchStrategy>(TYPES.SearchStrategy).to(SearchStrategy).inSingletonScope();
+  container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
+  container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
+  container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
+  container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
   container.bind<RettiwtKeyManager>(TYPES.RettiwtKeyManager).to(RettiwtKeyManager).inSingletonScope();
 
-  // Initialize DateValidator with SearchConfig
-  const dateValidator = container.get<DateValidator>(TYPES.DateValidator);
-  const searchConfig = container.get<SearchConfig>(TYPES.SearchConfig);
-  
-  // Break circular dependency
-  dateValidator.setSearchConfig(searchConfig);
+  // Telegram Related
+  container.bind<TelegramBot>(TYPES.TelegramBot).to(TelegramBot).inSingletonScope();
+  container.bind<TelegramMessageQueue>(TYPES.TelegramMessageQueue).to(TelegramMessageQueue).inSingletonScope();
+  container.bind<TelegramMessageSender>(TYPES.TelegramMessageSender).to(TelegramMessageSender).inSingletonScope();
+  container.bind<TelegramBotApi>('TelegramBotApi').toDynamicValue((context) => {
+    const configManager = context.container.get<ConfigManager>(TYPES.ConfigManager);
+    const environment = configManager.getEnvConfig<string>('TELEGRAM_BOT_TOKEN');
+    return new TelegramBotApi(environment, { polling: false });
+  }).inSingletonScope();
 
-  // Initialize rate limiter
-  const rateLimitedQueue = new RateLimitedQueue(
-    logger,
-    container.get<MetricsManager>(TYPES.MetricsManager)
-  );
-  await rateLimitedQueue.initialize();
-  container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).toConstantValue(rateLimitedQueue);
 
-  // Initialize search components
-  container.bind<RettiwtSearchBuilder>(TYPES.RettiwtSearchBuilder).to(RettiwtSearchBuilder).inSingletonScope();
-  container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
-  container.bind<TwitterClient>(TYPES.TwitterClient).to(TwitterClient).inSingletonScope();
-  container.bind<SearchStrategy>(TYPES.SearchStrategy).to(SearchStrategy).inSingletonScope();
-
-  // Initialize Telegram components in correct order
-  container.bind<TopicManager>(TYPES.TopicManager).to(TopicManager).inSingletonScope();
-  container.bind<Storage>(TYPES.Storage).to(Storage).inSingletonScope();
-  container.bind<FileMessageStorage>(TYPES.MessageStorage).to(FileMessageStorage).inSingletonScope();
-  container.bind<EnhancedMessageFormatter>(TYPES.TweetFormatter).to(EnhancedMessageFormatter).inSingletonScope();
-
-  // Create and bind TelegramBotApi instance
-  const environment = container.get<Environment>(TYPES.Environment);
-  const envConfig = environment.getConfig();
-  if (!envConfig.telegram?.api?.botToken) {
-    throw new Error('Telegram bot token is missing');
-  }
-  const botApi = new TelegramBotApi(envConfig.telegram.api.botToken, { polling: false });
-  container.bind('TelegramBotApi').toConstantValue(botApi);
-
-  // Initialize TelegramMessageSender before TelegramBot and TelegramMessageQueue
-  container.bind(TYPES.TelegramMessageSender).to(TelegramMessageSender).inSingletonScope();
-
-  // Initialize Telegram Message Queue
-  const telegramQueueConfig: TelegramQueueConfig = {
+  // Telegram Queue Configuration
+  container.bind<TelegramQueueConfig>(TYPES.TelegramQueueConfig).toDynamicValue(() => ({
+    maxQueueSize: 1000,
+    maxRetries: 3,
     baseDelayMs: 1000,
     rateLimitWindowMs: 60000, // 1 minute
     maxMessagesPerWindow: 20,
-    maxRetries: 3,
-    maxQueueSize: 1000,
-    persistenceEnabled: false
-  };
-  container.bind<TelegramQueueConfig>(TYPES.TelegramQueueConfig).toConstantValue(telegramQueueConfig);
-  container.bind<TelegramMessageQueue>(TYPES.TelegramMessageQueue).to(TelegramMessageQueue).inSingletonScope();
+    persistenceEnabled: false // Disable persistence by default
+  })).inSingletonScope();
 
-  // Initialize TelegramBot after TelegramMessageSender and TelegramMessageQueue
-  container.bind<TelegramBot>(TYPES.TelegramBot).to(TelegramBot).inSingletonScope();
-  container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
+  // Message Processing
+  container.bind<MessageProcessor>(TYPES.MessageProcessor).to(MessageProcessor).inSingletonScope();
+  container.bind<MessageValidator>(TYPES.MessageValidator).to(MessageValidator).inSingletonScope();
+  container.bind<TweetFormatter>(TYPES.TweetFormatter).to(EnhancedMessageFormatter).inSingletonScope();
+  container.bind<FilterPipeline>(TYPES.FilterPipeline).to(FilterPipeline).inSingletonScope();
 
-  // Initialize TwitterNotifier last
-  container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
+  // Topic Management
+  container.bind<TopicManager>(TYPES.TopicManager).to(TopicManager).inSingletonScope();
+  container.bind<TopicFilterManager>(TYPES.TopicFilterManager).to(TopicFilterManager).inSingletonScope();
 
-  // Start cache cleanup interval
-  const cacheManager = container.get<SearchCacheManager>(TYPES.SearchCacheManager);
-  cacheManager.startCleanupInterval();
+  // Validation
+  container.bind<DateValidator>(TYPES.DateValidator).to(DateValidator).inSingletonScope();
+
+  // Initialize DateValidator with SearchConfig to break circular dependency
+  const dateValidator = container.get<DateValidator>(TYPES.DateValidator);
+  const searchConfig = container.get<SearchConfig>(TYPES.SearchConfig);
+  dateValidator.setSearchConfig(searchConfig);
+
+  return container;
+}
+
+export function initializeContainer(): Container {
+  const container = createContainer();
+  
+  // Initialize database
+  const dbManager = container.get<DatabaseManager>(TYPES.DatabaseManager);
+  dbManager.initialize().catch(error => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  });
 
   return container;
 }

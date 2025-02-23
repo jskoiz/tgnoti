@@ -1,7 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { TYPES } from '../types/di.js';
 import { Logger } from '../types/logger.js';
-import { Tweet, TweetFilter, SearchResponse, TweetUser, mapRettiwtTweetToTweet } from '../types/twitter.js';
+import { Tweet, TweetFilter, SearchResponse, TweetUser, mapRettiwtTweetToTweet, SearchQueryConfig } from '../types/twitter.js';
 import { MetricsManager } from '../types/metrics.js';
 import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
 import { RettiwtKeyManager } from './rettiwtKeyManager.js';
@@ -32,12 +32,19 @@ class SearchError extends Error implements TwitterError {
   }
 }
 
+interface RettiwtSearchResponse {
+  list: any[];
+  meta?: { next_token?: string };
+}
+
 @injectable()
 export class TwitterClient {
   private client: Rettiwt;
   private readonly RETRYABLE_CODES = [500, 502, 503, 504];
   private readonly MAX_RETRIES = 3;
   private readonly BASE_DELAY = 1000; // 1 second
+  private readonly API_TIMEOUT = 15000; // 15 seconds
+  private readonly REQUEST_TIMEOUT = 30000; // 30 seconds
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -45,6 +52,8 @@ export class TwitterClient {
     @inject(TYPES.RateLimitedQueue) private queue: RateLimitedQueue,
     @inject(TYPES.RettiwtKeyManager) private keyManager: RettiwtKeyManager
   ) {
+    // Initialize queue with appropriate rate limit (5 requests per second)
+    this.queue.setRateLimit(5);
     this.client = this.createClient();
   }
 
@@ -53,8 +62,28 @@ export class TwitterClient {
    */
   private createClient(): Rettiwt {
     const apiKey = this.keyManager.getCurrentKey();
+    
+    // Validate API key format
+    if (!this.isValidApiKey(apiKey)) {
+      this.logger.error('Invalid API key format', {
+        keyLength: apiKey?.length || 0,
+        keyPrefix: apiKey?.substring(0, 4),
+        isBase64: this.isBase64(apiKey)
+      });
+      throw new Error('Invalid API key format');
+    }
+    
+    this.logger.debug('Creating Rettiwt client with key', {
+      keyLength: apiKey?.length || 0,
+      keyPrefix: apiKey?.substring(0, 4),
+      currentKeyIndex: this.keyManager.getCurrentKeyIndex(),
+      isBase64: this.isBase64(apiKey)
+    });
+
+    
     return new Rettiwt({ 
-      apiKey: apiKey
+      apiKey: apiKey,
+      timeout: this.REQUEST_TIMEOUT
     });
   }
 
@@ -67,6 +96,7 @@ export class TwitterClient {
       this.metrics.increment('twitter.search.attempt');
       this.logger.debug('Starting tweet search with filter:', { filter });
       
+      await this.queue.initialize(); // Ensure queue is initialized
       const result = await this.queue.add(async () => {
         const searchParams = this.sanitizeSearchParams(filter);
         const response = await this.performSearch(searchParams);
@@ -128,22 +158,111 @@ export class TwitterClient {
     let retryCount = 0;
     let lastError: Error | null = null;
 
+    // Convert TweetFilter to SearchQueryConfig
+    const searchConfig: SearchQueryConfig = {
+      type: 'structured',
+      accounts: params.fromUsers,
+      mentions: params.mentions,
+      keywords: params.includeWords,
+      language: params.language || 'en',
+      startTime: params.startDate?.toISOString(),
+      endTime: params.endDate?.toISOString(),
+      minLikes: params.minLikes,
+      minRetweets: params.minRetweets,
+      minReplies: params.minReplies
+    };
+
+    this.logger.debug('Starting search with config:', {
+      accounts: searchConfig.accounts,
+      startTime: searchConfig.startTime,
+      endTime: searchConfig.endTime
+    });
+
     while (retryCount <= this.MAX_RETRIES) {
       try {
-        const result = await this.client.tweet.search({
-          ...params,
-          fromUsers: params.fromUsers?.map(user => user.replace('@', '')),
-          mentions: params.mentions?.map(user => user.replace('@', ''))
+        // Validate client before search
+        if (!this.client?.tweet?.search) {
+          this.logger.error('Invalid Rettiwt client state', {
+            hasClient: !!this.client,
+            hasSearchMethod: !!(this.client?.tweet?.search)
+          });
+          throw new Error('Invalid Rettiwt client state');
+        }
+
+        this.logger.debug('Attempting search with client', {
+          retryCount,
+          hasClient: !!this.client,
+          hasSearchMethod: !!(this.client?.tweet?.search)
         });
+
+        // Log the exact request being made
+        this.logger.debug('Making Rettiwt API request', {
+          method: 'search',
+          config: searchConfig,
+          timeout: this.REQUEST_TIMEOUT
+        });
+
+        // Create a timeout promise that resolves to RettiwtSearchResponse
+        const timeoutPromise = new Promise<RettiwtSearchResponse>((_, reject) => {
+          setTimeout(() => {
+            const error = new Error('Search request timed out');
+            this.logger.error('API timeout exceeded', {
+              timeout: this.API_TIMEOUT,
+              config: searchConfig
+            });
+            reject(error);
+          }, this.API_TIMEOUT);
+        });
+
+        // Race between the search request and timeout
+        const result = await Promise.race<RettiwtSearchResponse>([
+          this.client.tweet.search(searchConfig) as Promise<RettiwtSearchResponse>,
+          timeoutPromise as Promise<RettiwtSearchResponse>
+        ]).catch(error => {
+          this.logger.error('Search request failed or timed out', {
+            error: error.message,
+            stack: error.stack,
+            code: error.code,
+            status: error.status,
+            details: error.details || {}
+          });
+          throw error;
+        });
+
+        if (!result || !result.list) throw new Error('Invalid search response');
 
         // Mark key as successful
         this.keyManager.markKeySuccess();
+        this.logger.debug('Search successful', {
+          resultCount: result.list.length,
+          firstTweetId: result.list[0]?.id,
+          config: searchConfig
+        });
 
+        this.logger.debug('Search response mapped successfully');
         // Use the mapping function to transform tweets
         return result.list.map(tweet => mapRettiwtTweetToTweet(tweet));
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         
+        // Enhanced error logging
+        this.logger.error('Search attempt failed:', {
+          errorType: error?.constructor?.name || typeof error,
+          errorInstance: error instanceof Error ? 'Error' : typeof error,
+          retryCount,
+          errorCode: (error as any)?.status || (error as any)?.code,
+          errorMessage: lastError.message,
+          errorStack: lastError.stack,
+          currentKeyIndex: this.keyManager.getKeyCount()
+        });
+
+        // Log raw error object for debugging
+        this.logger.error('Raw error details:', {
+          error: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+          hasErrorPrototype: Object.prototype.toString.call(error) === '[object Error]',
+          errorKeys: Object.keys(error || {})
+        });
+
         // Handle rate limiting
         if (this.isRateLimitError(error)) {
           this.metrics.increment('twitter.search.ratelimit');
@@ -180,9 +299,7 @@ export class TwitterClient {
     const sanitized = {
       ...params,
       fromUsers: params.fromUsers?.map(u => u.replace('@', '')),
-      mentions: params.mentions?.map(u => u.replace('@', '')),
-      startTime: params.startDate?.toISOString(),
-      endTime: params.endDate?.toISOString()
+      mentions: params.mentions?.map(u => u.replace('@', ''))
     };
 
     // Remove pagination properties before sending to API
@@ -250,5 +367,20 @@ export class TwitterClient {
    */
   private generateNextToken(lastTweetId: string): string {
     return Buffer.from(lastTweetId).toString('base64');
+  }
+
+  /**
+   * Check if string is valid base64
+   */
+  private isBase64(str: string): boolean {
+    try {
+      return btoa(atob(str)) === str;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  private isValidApiKey(key: string): boolean {
+    return typeof key === 'string' && key.length >= 32 && this.isBase64(key);
   }
 }

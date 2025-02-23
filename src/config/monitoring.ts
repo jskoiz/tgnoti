@@ -100,7 +100,7 @@ export const monitoringConfig: MonitoringConfig = {
         excludeReplies: false,
         excludeUsernames: [],
         excludePatterns: [],
-        searchQuery: "(tradewithPhoton OR bullx_io OR TradeonNova OR BloomTradingBot OR bonkbot_io)"
+        searchQuery: "(tradewithPhoton OR bullx_io OR BloomTradingBot OR bonkbot_io)"
       }],
       retryPolicy: DEFAULT_RETRY_POLICY,
       notification: {
@@ -143,7 +143,6 @@ export const monitoringConfig: MonitoringConfig = {
       filters: [{
         accounts: [
           "@bullx_io",
-          "@TradeonNova",
           "@BloomTradingBot",
           "@bonkbot_io"
         ],
@@ -153,7 +152,7 @@ export const monitoringConfig: MonitoringConfig = {
         excludeReplies: false,
         excludeUsernames: [],
         excludePatterns: [],
-        searchQuery: "(from:bullx_io OR from:TradeonNova OR from:BloomTradingBot OR from:bonkbot_io)"
+        searchQuery: "(from:bullx_io OR from:BloomTradingBot OR from:bonkbot_io)"
       }],
       retryPolicy: DEFAULT_RETRY_POLICY,
       notification: {
@@ -163,12 +162,61 @@ export const monitoringConfig: MonitoringConfig = {
           includeLinks: true
         }
       }
+    },
+    tradeonnova: {
+      id: 5574,
+      name: "TradeOnNova Monitor",
+      enabled: true,
+      type: MonitoringType.Account,
+      filters: [{
+        accounts: ["@TradeonNova"],
+        mentions: ["@TradeonNova"],
+        excludeRetweets: true,
+        excludeQuotes: false,
+        excludeReplies: false,
+        excludeUsernames: [],
+        excludePatterns: [],
+        searchQuery: "(from:TradeonNova OR TradeonNova)"
+      }],
+      retryPolicy: DEFAULT_RETRY_POLICY,
+      notification: {
+        enabled: true,
+        format: {
+          includeMetrics: true,
+          includeLinks: true
+        }
+      }
+    },
+    tradewithphoton: {
+      id: 5572,
+      name: "TradeWithPhoton Monitor",
+      enabled: true,
+      type: MonitoringType.Account,
+      filters: [{
+        accounts: ["@TradeWithPhoton"],
+        mentions: [],
+        excludeRetweets: true,
+        excludeQuotes: true,
+        excludeReplies: false,
+        excludeUsernames: [],
+        excludePatterns: [],
+        searchQuery: "from:TradeWithPhoton"
+      }],
+      retryPolicy: DEFAULT_RETRY_POLICY,
+      notification: {
+        enabled: true,
+        format: {
+          includeMetrics: true,
+          includeLinks: true
+        },
+        throttle: { maxPerHour: 100 }
+      }
     }
   },
   polling: {
     intervalMinutes: 0.5, // 30 seconds
     maxResults: 50,
-    timeWindowHours: 120, // 5 days
+    timeWindowHours: 24, // 1 day
     batchSize: 50,
     retry: {
       maxAttempts: 3,

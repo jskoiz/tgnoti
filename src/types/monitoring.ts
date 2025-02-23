@@ -1,3 +1,9 @@
+export interface CircuitBreakerConfig {
+  threshold: number;
+  resetTimeout: number;
+  testInterval: number;
+}
+
 // Define monitoring type as an enum
 export enum MonitoringType {
   Mention = 'mention',

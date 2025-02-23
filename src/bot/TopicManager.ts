@@ -1,7 +1,8 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
 import { TYPES } from '../types/di.js';
-import { TopicConfig, TOPIC_CONFIG } from '../types/telegram.js';
+import { TopicConfig } from '../types/telegram.js';
+import { TOPIC_CONFIG } from '../config/topicConfig.js';
 import TelegramBotApi from 'node-telegram-bot-api';
 
 @injectable()
@@ -22,9 +23,11 @@ export class TopicManager {
       this.logger.debug(`Validating topic access for topic ${topicId}`);
       
       // Check if topic exists in config
-      if (!Object.values(TOPIC_CONFIG).some((config: TopicConfig) => config.id === topicId)) {
+      const topicConfig = Object.values(TOPIC_CONFIG).find((config: TopicConfig) => config.id === topicId);
+      if (!topicConfig) {
         this.logger.warn(`Topic ${topicId} not found in TOPIC_CONFIG, attempting direct validation`);
       }
+
       // Try to validate access to the requested topic
       if (await this.validateTopicAccess(bot, groupId, topicId)) {
         return topicId;

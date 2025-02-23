@@ -70,9 +70,7 @@ export class RettiwtSearchBuilder {
       
       // Ensure includeWords has at least one term by using account names if no keywords
       const searchTerms = config.keywords?.map(k => k.toLowerCase()) || [];
-      if (searchTerms.length === 0 && fromUsers.length > 0) {
-        searchTerms.push(...fromUsers);
-      }
+      // Remove redundant includeWords when fromUsers is specified
       
       const filter = {
         fromUsers, mentions, includeWords: searchTerms,

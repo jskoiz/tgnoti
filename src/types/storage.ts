@@ -39,11 +39,24 @@ export interface TwitterConfig {
   pollingInterval: number;
 }
 
+export interface TelegramTopicConfig {
+  name: string;
+  description?: string;
+  filters?: {
+    users: string[];
+    mentions: string[];
+    keywords: string[];
+  };
+}
+
 export interface TelegramConfig {
   botToken: string;
   groupId: string;
   defaultTopicId: string;
   retryAttempts: number;
+  topics?: {
+    [topicId: string]: TelegramTopicConfig;
+  };
 }
 
 export interface Config {

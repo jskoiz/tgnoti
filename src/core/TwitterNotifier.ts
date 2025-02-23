@@ -32,7 +32,7 @@ export class TwitterNotifier {
 
       // 1. Validate system time
       this.logger.info('Validating system time...');
-      this.dateValidator.validateSystemTime();
+      await this.dateValidator.validateSystemTime();
 
       // 2. Validate environment
       this.logger.info('Validating environment...');

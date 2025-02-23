@@ -12,6 +12,7 @@ import { TYPES } from '../types/di.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
 import { SearchConfig } from '../config/searchConfig.js';
 import { SearchStrategy } from '../twitter/searchStrategy.js';
+import { getTopicName } from '../config/topicConfig.js';
 
 interface ProcessingResult {
   totalFound: number;
@@ -55,17 +56,41 @@ export class TweetProcessor {
       this.logger.debug('Starting tweet processing cycle');
       this.metrics.increment('tweet.processing.cycles');
 
+      this.logger.debug('Creating search window...');
       const { startDate, endDate } = await this.createSearchWindow();
+      this.logger.debug('Search window created', { startDate, endDate });
+
+      this.logger.debug('Validating search window...');
       await this.dateValidator.validateSearchWindow(startDate, endDate);
+      this.logger.debug('Search window validated', { startDate, endDate });
+      this.metrics.increment('date.validation.success');
 
       // Process each topic's tweets
       for (const [topicId, searchConfig] of Object.entries(config.twitter.searchQueries as Record<string, SearchQueryConfig>)) {
         try {
+          this.logger.debug(`Processing topic: ${this.getTopicName(topicId)}`, {
+            topicId,
+            searchConfig: {
+              type: searchConfig.type,
+              accounts: searchConfig.accounts,
+              keywords: searchConfig.keywords
+            }
+          });
+
+          this.logger.debug('About to process topic tweets...', { topicId, searchConfig });
           const topicResult = await this.processTopicTweets(topicId, searchConfig, startDate, endDate);
           result.totalFound += topicResult.found;
           result.totalProcessed += topicResult.processed;
           result.totalSent += topicResult.sent;
           result.totalErrors += topicResult.errors;
+
+          this.logger.debug(`Completed topic: ${this.getTopicName(topicId)}`, {
+            topicId,
+            found: topicResult.found,
+            processed: topicResult.processed,
+            sent: topicResult.sent,
+            errors: topicResult.errors
+          });
         } catch (error) {
           this.errorHandler.handleError(error, `Topic ${this.getTopicName(topicId)}`);
           result.totalErrors++;
@@ -78,6 +103,14 @@ export class TweetProcessor {
 
       result.processingTimeMs = Date.now() - startTime;
       this.recordMetrics(result);
+
+      this.logger.info('Tweet processing cycle completed', {
+        totalFound: result.totalFound,
+        totalProcessed: result.totalProcessed,
+        totalSent: result.totalSent,
+        totalErrors: result.totalErrors,
+        duration: result.processingTimeMs
+      });
 
       return result;
     } catch (error) {
@@ -107,35 +140,47 @@ export class TweetProcessor {
     try {
       // Use SearchStrategy for enhanced search
       const tweets = await this.searchStrategy.search({
-        username: searchConfig.accounts?.[0] || '',
+        username: searchConfig.accounts?.[0] || '', 
         startDate,
-        endDate
+        endDate,
+        excludeRetweets: searchConfig.excludeRetweets,
+        excludeQuotes: searchConfig.excludeQuotes,
+        language: searchConfig.language || 'en',
+        operator: searchConfig.operator
       });
 
       if (!tweets.length) {
-        this.logger.debug(`No tweets found for ${this.getTopicName(topicId)}`);
+        this.logger.debug(`No tweets found for ${this.getTopicName(topicId)}`, {
+          topicId,
+          dateRange: `${startDate.toISOString()} to ${endDate.toISOString()}`
+        });
         return result;
       }
 
-    result.found = tweets.length;
+      result.found = tweets.length;
 
-    if (tweets.length > 0) {
-      this.logger.debug(`Found ${tweets.length} new tweets for ${this.getTopicName(topicId)}`);
-      this.metrics.gauge(`tweet.found.${topicId}`, tweets.length);
-    }
+      this.logger.debug(`Processing ${tweets.length} tweets for ${this.getTopicName(topicId)}`, {
+        topicId,
+        tweetIds: tweets.slice(0, 5).map(t => t.id) // Log first 5 tweet IDs
+      });
 
-    // Process each tweet
-    for (const tweet of tweets) {
-      const processed = await this.processSingleTweet(tweet, topicId);
-      if (processed.sent) result.sent++;
-      if (processed.error) result.errors++;
-      result.processed++;
-    }
+      // Process each tweet
+      for (const tweet of tweets) {
+        try {
+          const processed = await this.processSingleTweet(tweet, topicId);
+          if (processed.sent) result.sent++;
+          if (processed.error) result.errors++;
+          result.processed++;
+        } catch (error) {
+          this.errorHandler.handleError(error, `Tweet ${tweet.id}`);
+          result.errors++;
+        }
+      }
 
-    // Update last tweet ID if any tweets were found
-    if (tweets.length > 0) {
-      await this.storage.updateLastTweetId(topicId, tweets[0].id);
-    }
+      // Update last tweet ID if any tweets were found
+      if (tweets.length > 0) {
+        await this.storage.updateLastTweetId(topicId, tweets[0].id);
+      }
 
     } catch (error) {
       this.errorHandler.handleError(error, `Search for ${this.getTopicName(topicId)}`);
@@ -233,26 +278,6 @@ export class TweetProcessor {
   }
 
   /**
-   * Build search filter with error handling
-   */
-  private async buildSearchFilter(
-    searchConfig: SearchQueryConfig,
-    startDate: Date,
-    endDate: Date
-  ): Promise<ReturnType<RettiwtSearchBuilder['buildFilter']> | null> {
-    try {
-      return this.searchBuilder.buildFilter({
-        ...searchConfig,
-        startTime: startDate.toISOString(),
-        endTime: endDate.toISOString()
-      });
-    } catch (error) {
-      this.errorHandler.handleError(error, 'Filter building');
-      return null;
-    }
-  }
-
-  /**
    * Send formatted tweet to Telegram
    */
   private async sendFormattedTweet(tweet: Tweet, topicId: string): Promise<boolean> {
@@ -294,13 +319,6 @@ export class TweetProcessor {
    * Get human-readable topic name
    */
   private getTopicName(topicId: string): string {
-    switch (topicId) {
-      case '381':
-        return 'Trojan Monitor';
-      case '377':
-        return 'Competitor Monitor';
-      default:
-        return `Topic ${topicId}`;
-    }
+    return getTopicName(topicId);
   }
 }

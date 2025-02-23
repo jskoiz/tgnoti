@@ -1,5 +1,7 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
+import { CircuitBreakerConfig } from '../types/monitoring.js';
+import { TYPES } from '../types/di.js';
 
 @injectable()
 export class CircuitBreaker {
@@ -11,12 +13,12 @@ export class CircuitBreaker {
   private readonly testInterval: number;
 
   constructor(
-    private readonly logger: Logger,
-    threshold = 5, resetTimeout = 30000, testInterval = 5000
+    @inject(TYPES.Logger) private readonly logger: Logger,
+    @inject(TYPES.CircuitBreakerConfig) config: CircuitBreakerConfig
   ) {
-    this.threshold = threshold;
-    this.resetTimeout = resetTimeout;
-    this.testInterval = testInterval;
+    this.threshold = config.threshold;
+    this.resetTimeout = config.resetTimeout;
+    this.testInterval = config.testInterval;
   }
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
