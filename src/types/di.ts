@@ -8,6 +8,7 @@ export const TYPES = {
   CircuitBreaker: Symbol.for('CircuitBreaker'),
   CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
   MetricsManager: Symbol.for('MetricsManager'),
+  MonitoringDashboard: Symbol.for('MonitoringDashboard'),
   
   // Twitter Related
   TwitterClient: Symbol.for('TwitterClient'),
@@ -30,6 +31,8 @@ export const TYPES = {
   MessageProcessor: Symbol.for('MessageProcessor'),
   MessageValidator: Symbol.for('MessageValidator'),
   MessageFormatter: Symbol.for('MessageFormatter'),
+  TweetProcessingPipeline: Symbol.for('TweetProcessingPipeline'),
+  MigrationManager: Symbol.for('MigrationManager'),
   FilterPipeline: Symbol.for('FilterPipeline'),
   MessageStorage: Symbol.for('MessageStorage'),
   
@@ -44,5 +47,13 @@ export const TYPES = {
   
   // System
   BasePath: Symbol.for('BasePath'),
-  RateLimitedQueue: Symbol.for('RateLimitedQueue')
+  RateLimitedQueue: Symbol.for('RateLimitedQueue'),
+  
+  // Pipeline Stages
+  FetchStage: Symbol.for('FetchStage'),
+  ValidationStage: Symbol.for('ValidationStage'),
+  FilterStage: Symbol.for('FilterStage'),
+  FormatStage: Symbol.for('FormatStage'),
+  SendStage: Symbol.for('SendStage')
+  
 };

@@ -1,762 +1,297 @@
-# Twitter Search System Patterns
+# System Patterns
 
-## Layered Architecture Overview
+## Pipeline Pattern
+Implemented in the tweet processing system to provide clear flow and responsibility separation.
 
-The Twitter search implementation follows a layered architecture with several key components working together:
+### Core Components
+1. Pipeline Orchestrator (TweetProcessingPipeline)
+   - Manages stage execution
+   - Handles error propagation
+   - Maintains processing context
+   - Records metrics
 
-### Layer 1: API Rate Management
-- RateLimitedQueue handles low-level API request throttling
-- RettiwtKeyManager manages API key rotation
-- Works directly with the Twitter API
-- Ensures stable API interaction without rate limit issues
+2. Pipeline Stages
+   - FetchStage: Tweet retrieval and enrichment
+   - ValidationStage: Content validation and deduplication
+   - FilterStage: Content filtering and relevance checks
+   - FormatStage: Message formatting and preparation
+   - SendStage: Message delivery to Telegram
 
-### Layer 2: Search Optimization
-- SearchCacheManager provides 60-second TTL caching
-- SearchStrategy manages search organization and pagination
-- Reduces API calls through caching and deduplication
-- Handles cursor-based pagination for large result sets
+### Benefits
+- Clear responsibility boundaries
+- Easier debugging and maintenance
+- Better error handling
+- Improved monitoring capabilities
 
-### Layer 3: Business Logic
-- TweetProcessor handles tweet validation and processing
-- MessageFormatter manages output formatting
-- TopicFilterManager handles topic-specific filter management
-- Implements business rules and data transformation
-
-These layers work together to provide efficient search and processing:
-1. Layer 1 ensures API stability and manages rate limits
-2. Layer 2 optimizes search performance and reduces API calls
-3. Layer 3 handles business requirements and data formatting
-
-## Implementation Patterns
-
-The Twitter search implementation follows several key architectural patterns and principles:
-
-### 1. Rate Limiting Pattern
-
-The `RateLimitedQueue` implements a token bucket-style rate limiter with async initialization:
-
+### Implementation Details
+1. Stage Interface
 ```typescript
-@injectable()
-class RateLimitedQueue {
-  private queue: QueueTask[] = [];
-  private processing: boolean = false;
-  private requestsPerSecond: number = 1;
-  private lastProcessTime: number;
-
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.MetricsManager) private metrics: MetricsManager
-  ) {
-    this.queue = [];
-    this.processing = false;
-    this.requestsPerSecond = 1; // Default rate limit
-    this.lastProcessTime = Date.now();
-  }
-
-  async initialize(): Promise<void> {
-    this.logger.info('Initializing rate-limited queue');
-    this.startProcessing(); // Launch processing in the background
-    return Promise.resolve();
-  }
-
-  private startProcessing(): void {
-    if (this.processing) return;
-    this.processing = true;
-    
-    (async () => {
-      while (this.processing) {
-        try {
-          const task = this.queue.shift();
-          if (!task) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-            continue;
-          }
-
-          const now = Date.now();
-          const timeSinceLastProcess = now - this.lastProcessTime;
-          const minInterval = 1000 / this.requestsPerSecond;
-
-          if (timeSinceLastProcess < minInterval) {
-            await new Promise(resolve => 
-              setTimeout(resolve, minInterval - timeSinceLastProcess)
-            );
-          }
-
-          await task();
-          this.lastProcessTime = Date.now();
-          this.metrics.increment('queue.tasks.processed');
-        } catch (error) {
-          this.logger.error('Error processing queue task:', error);
-          this.metrics.increment('queue.tasks.errors');
-        }
-      }
-    })();
-  }
+interface PipelineStage<Input, Output> {
+  name: string;
+  execute(input: Input): Promise<StageResult<Output>>;
 }
 ```
 
-Benefits:
-- Non-blocking initialization
-- Precise rate control
-- Dynamic rate adjustment
-- Queue-based task management
-- Metrics tracking for monitoring
-
-### 2. Message Formatting Pattern
-
-The `EnhancedMessageFormatter` implements a structured message formatting pattern with clear visual separation:
-
+2. Context Passing
 ```typescript
-@injectable()
-class EnhancedMessageFormatter implements TweetFormatter {
-  public formatMessage(config: TweetMessageConfig): string {
-    const { tweet, quotedTweet, showSummarizeButton, translationMessage } = config;
-    
-    const parts = [
-      this.formatHeader(tweet),
-      this.formatTimestamp(tweet.createdAt),
-      this.formatEngagementMetrics(tweet),
-      '',
-      '',  // Double line break for visual separation
-      tweet?.text || '',
-      this.formatMediaIndicator(tweet.media),
-      quotedTweet ? this.formatQuotedTweet(quotedTweet) : '',
-      translationMessage || '',
-      '',
-      this.formatButtons(showSummarizeButton || false)
-    ];
-
-    return parts.filter(Boolean).join('\n');
-  }
+interface TweetContext {
+  tweet: Tweet;
+  topicId: string;
+  processed: boolean;
+  validated: boolean;
+  filtered: boolean;
+  formatted: boolean;
+  sent: boolean;
+  metadata: Record<string, unknown>;
 }
 ```
 
-Benefits:
-- Clear visual hierarchy
-- Consistent message structure
-- Distinct separation between metadata and content
-- Easy to modify formatting patterns
-- Maintainable component organization
+3. Error Handling
+- Stage-specific error handling
+- Error propagation through pipeline
+- Comprehensive error logging
+- Metric recording for failures
 
-### 3. Builder Pattern
+## Queue Pattern
+Used in message delivery to handle rate limiting and ensure reliable delivery.
 
-The `RettiwtSearchBuilder` implements the Builder pattern to construct search filters:
+### Components
+1. Message Queue
+   - Priority-based ordering
+   - Rate limit handling
+   - Retry mechanism
+   - Error recovery
 
+2. Queue Manager
+   - Queue state management
+   - Processing control
+   - Metric collection
+
+### Benefits
+- Reliable message delivery
+- Rate limit compliance
+- Priority handling
+- Performance optimization
+
+## Dependency Injection
+Used throughout the system to improve testability and maintainability.
+
+### Benefits
+- Clear dependencies
+- Easier testing
+- Better modularity
+- Simplified configuration
+
+### Implementation
 ```typescript
 @injectable()
-class RettiwtSearchBuilder {
-  constructor(@inject(TYPES.Logger) private logger: Logger) {}
-
-  buildSimpleWordSearch(word: string): TweetFilter {
-    const filter = {
-      includeWords: [word.toLowerCase()],
-      language: 'en',
-      links: true,
-      replies: true,
-      minLikes: 0,
-      minReplies: 0,
-      minRetweets: 0
-    };
-    return new TweetFilter(filter);
-  }
-
-  buildFilter(config: SearchQueryConfig): TweetFilter {
-    const includeWords: string[] = [];
-    
-    if (config.keywords?.length) {
-      includeWords.push(...config.keywords);
-    }
-    
-    if (config.accounts?.length) {
-      includeWords.push(...config.accounts.map(a => `from:${a.replace(/^@/, '')}`));
-    }
-    
-    if (config.mentions?.length) {
-      includeWords.push(...config.mentions.map(m => `@${m.replace(/^@/, '')}`));
-    }
-
-    if (includeWords.length === 0) {
-      throw new Error('Invalid search config: No search criteria provided');
-    }
-
-    return new TweetFilter({
-      includeWords,
-      language: config.language,
-      startDate: config.startTime ? new Date(config.startTime) : undefined,
-      endDate: config.endTime ? new Date(config.endTime) : undefined,
-      links: !config.excludeQuotes
-    });
-  }
-}
-```
-
-Benefits:
-- Encapsulates filter construction logic
-- Provides a clean interface for creating different types of filters
-- Validates search criteria
-- Handles date conversions and formatting
-
-### 4. Dependency Injection
-
-The implementation uses Inversify for dependency injection:
-
-```typescript
-@injectable()
-export class RettiwtSearchBuilder {
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger
-  ) {}
-}
-```
-
-Benefits:
-- Loose coupling between components
-- Easier testing through mock injection
-- Flexible configuration management
-- Clear dependency hierarchy
-
-### 5. Interface-Based Dependency Resolution
-
-The system uses interfaces to break circular dependencies and improve modularity:
-
-```typescript
-// Interface definition
-interface IDateValidator {
-  getCurrentTime(): Promise<Date>;
-  validateSystemTime(): Promise<void>;
-  validateSearchWindow(startDate: Date, endDate: Date): Promise<void>;
-  validateTweetDate(tweet: any): Promise<boolean>;
-}
-
-// Implementation
-@injectable()
-class DateValidator implements IDateValidator {
+export class PipelineStage {
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager
   ) {}
 }
+```
 
-// Dependent service using interface
+## Error Handling Pattern
+Comprehensive error handling strategy across the system.
+
+### Components
+1. Error Categories
+   - Validation errors
+   - Processing errors
+   - Network errors
+   - Rate limit errors
+
+2. Error Recovery
+   - Retry mechanisms
+   - Circuit breakers
+   - Fallback strategies
+
+### Implementation
+```typescript
+try {
+  // Operation
+} catch (error) {
+  // Log error
+  this.logger.error('Operation failed', error);
+  
+  // Record metric
+  this.metrics.increment('error.count');
+  
+  // Handle error
+  this.errorHandler.handleError(error);
+}
+```
+
+## Metrics Collection
+Comprehensive metrics collection throughout the system.
+
+### Types of Metrics
+1. Performance Metrics
+   - Processing time
+   - Queue length
+   - Rate limit hits
+
+2. Error Metrics
+   - Error counts
+   - Retry attempts
+   - Recovery success rate
+
+3. Business Metrics
+   - Messages processed
+   - Messages sent
+   - Filter effectiveness
+
+### Implementation
+```typescript
+// Timing metrics
+const startTime = Date.now();
+// ... operation ...
+this.metrics.timing('operation.duration', Date.now() - startTime);
+
+// Counter metrics
+this.metrics.increment('messages.processed');
+
+// Gauge metrics
+this.metrics.gauge('queue.length', queueLength);
+```
+
+## Configuration Management
+Centralized configuration management with validation.
+
+### Features
+1. Configuration Validation
+   - Type checking
+   - Required fields
+   - Value constraints
+
+2. Environment Support
+   - Development
+   - Production
+   - Testing
+
+3. Dynamic Updates
+   - Hot reload support
+   - Validation on change
+   - Change notification
+
+### Implementation
+```typescript
+export interface Config {
+  // Configuration interface
+}
+
 @injectable()
-class SearchConfig {
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.DateValidator) private dateValidator: IDateValidator
-  ) {}
+export class ConfigManager {
+  // Configuration management
 }
 ```
 
-Benefits:
-- Breaks circular dependencies
-- Improves code modularity
-- Enables better testing through interface mocking
-- Supports dependency inversion principle
-- Allows two-phase initialization when needed
-- Reduces coupling between components
+## Monitoring Dashboard Pattern
+Centralized monitoring system for real-time insights and metrics tracking.
 
-### 6. Search Configuration Pattern
+## Migration Pattern
+Used to safely transition from legacy to new pipeline architecture.
 
-The search configuration system uses a streamlined approach with a 5-day search window:
+### Components
+1. MigrationManager
+   - Parallel processing control
+   - Result comparison logic
+   - Performance metrics collection
+   - Error tracking and logging
 
-```typescript
-interface SearchQueryConfig {
-  type: 'structured';
-  accounts?: string[];    // For searching tweets from specific accounts
-  mentions?: string[];    // For searching mentions of specific accounts
-  keywords?: string[];    // For general keyword search
-  language: string;       // Tweet language (e.g., 'en')
-  startTime?: string;     // ISO timestamp for search window start
-  endTime?: string;       // ISO timestamp for search window end
-  excludeQuotes?: boolean; // Whether to exclude quoted tweets
-}
+2. Migration Validator
+   - Test execution orchestration
+   - Result validation
+   - Performance comparison
+   - Recommendation generation
 
-// Search window configuration
-const searchWindow = {
-  pastDays: 5,           // Search up to 5 days in the past
-  futureDays: 7,         // Allow tweets scheduled up to 7 days ahead
-  defaultWindow: 5       // Default to 5-day search window
-};
-```
-
-Benefits:
-- Clear separation of search criteria
-- Type-safe configuration handling
-- Flexible search options
-- Built-in validation rules
-- Focused search window for relevant results
-- Optimized data retrieval
-
-### 7. Strategy Pattern
-
-The search implementation uses different strategies based on the search type:
-
-```typescript
-buildFilter(config: SearchQueryConfig): TweetFilter {
-  const includeWords: string[] = [];
-  
-  if (config.keywords?.length) {
-    includeWords.push(...config.keywords);
-  }
-  
-  if (config.accounts?.length) {
-    includeWords.push(...config.accounts.map(a => `from:${a.replace(/^@/, '')}`));
-  }
-  
-  if (config.mentions?.length) {
-    includeWords.push(...config.mentions.map(m => `@${m.replace(/^@/, '')}`));
-  }
-
-  return new TweetFilter({
-    includeWords,
-    language: config.language,
-    startDate: config.startTime ? new Date(config.startTime) : undefined,
-    endDate: config.endTime ? new Date(config.endTime) : undefined,
-    links: !config.excludeQuotes
-  });
-}
-```
-
-Benefits:
-- Encapsulates different search algorithms
-- Easy to add new search strategies
-- Clean separation of concerns
-- Consistent error handling
-
-### 8. Observer Pattern
-
-The logging and metrics system implements an observer-like pattern:
-
-```typescript
-this.logger.debug(`Built filter: ${JSON.stringify(filter)}`);
-this.metrics.increment('search.attempt');
-```
-
-Benefits:
-- Decoupled monitoring and logging
-- Easy to add new observers
-- Non-blocking operation
-- Consistent metrics collection
-
-## Code Organization
-
-### 1. Layer Separation
-
-The implementation follows a clear layer separation:
-
-```
-src/
-  ├── twitter/          # Twitter-specific implementations
-  ├── types/            # TypeScript type definitions
-  ├── utils/            # Shared utilities
-  ├── config/           # Configuration management
-  └── tests/            # Test files
-```
-
-### 2. Interface Segregation
-
-Interfaces are kept focused and specific:
-
-```typescript
-interface SearchQueryConfig {
-  type: 'structured';
-  language: string;
-  accounts?: string[];
-  mentions?: string[];
-  keywords?: string[];
-  startTime?: string;
-  endTime?: string;
-  excludeQuotes?: boolean;
-}
-```
-
-## Error Handling Patterns
-
-### 1. Error Hierarchy
-
-```typescript
-class RettiwtError extends Error {
-  constructor(
-    public code: number,
-    message: string
-  ) {
-    super(message);
-  }
-}
-```
-
-### 2. Error Recovery
-
-The implementation uses multiple error recovery patterns:
-
-1. **Circuit Breaker**:
+### Implementation
 ```typescript
 @injectable()
-class CircuitBreaker {
-  private failures = 0;
-  private lastFailure: number = 0;
-  private lastTest: number = 0;
-  private readonly threshold: number;
-  private readonly resetTimeout: number;
-  private readonly testInterval: number;
+export class MigrationManager {
+  async processTweetsWithValidation(
+    tweets: Tweet[],
+    topicId: string
+  ): Promise<void> {
+    // Process with legacy implementation
+    const legacyResult = await this.legacyProcessor.process(tweet);
 
-  async execute<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.isOpen()) {
-      throw new Error('Circuit breaker is open');
-    }
-
-    try {
-      if (this.isHalfOpen()) {
-        if (Date.now() - this.lastTest < this.testInterval) {
-          throw new Error('Circuit breaker is open');
-        }
-        this.lastTest = Date.now();
-      }
-
-      const result = await operation();
-      this.reset();
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
-      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
-        throw error;
-      }
-
-      this.recordFailure(error);
-      throw error;
-    }
-  }
-}
-```
-
-2. **Retry with Backoff**:
-```typescript
-private async retryWithBackoff<T>(
-  operation: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelay: number = 1000
-): Promise<T>
-```
-
-## Testing Patterns
-
-### 1. Unit Testing
-
-```typescript
-describe('RettiwtSearchBuilder', () => {
-  describe('buildFilter', () => {
-    it('should create a search filter with accounts and mentions', () => {
-      const filter = searchBuilder.buildFilter({
-        type: 'structured',
-        accounts: ['user1'],
-        mentions: ['user2'],
-        language: 'en'
-      });
-      expect(filter.accounts).toEqual(['user1']);
-      expect(filter.mentions).toEqual(['user2']);
+    // Process with new pipeline
+    const pipelineResult = await this.pipeline.process({
+      tweet,
+      topicId,
+      metadata: {}
     });
-  });
-});
-```
 
-### 2. Integration Testing
-
-```typescript
-describe('TwitterClient', () => {
-  describe('searchTweets', () => {
-    it('should perform a search with accounts and mentions', async () => {
-      const result = await client.searchTweets({
-        type: 'structured',
-        accounts: ['user1'],
-        mentions: ['user2'],
-        language: 'en'
-      });
-      expect(result).toBeDefined();
-    });
-  });
-});
-```
-
-## Configuration Patterns
-
-### 1. Environment-based Configuration
-
-```typescript
-const config = {
-  apiKey: process.env.RETTIWT_API_KEY,
-  timeout: parseInt(process.env.API_TIMEOUT || '5000'),
-  retryAttempts: parseInt(process.env.RETRY_ATTEMPTS || '3')
-};
-```
-
-### 2. Type-safe Configuration
-
-```typescript
-interface TwitterConfig {
-  apiKey: string;
-  timeout: number;
-  retryAttempts: number;
-}
-
-function validateConfig(config: Partial<TwitterConfig>): config is TwitterConfig {
-  return Boolean(
-    config.apiKey &&
-    typeof config.timeout === 'number' &&
-    typeof config.retryAttempts === 'number'
-  );
+    // Compare results
+    await this.compareResults(legacyResult, pipelineResult);
+  }
 }
 ```
 
-## Monitoring Patterns
+### Migration Strategy
+1. Parallel Processing
+   - Run both implementations
+   - Compare results
+   - Track metrics
+   - Log differences
 
-### 1. Structured Logging
+### Components
+1. Dashboard Core
+   - Metrics aggregation
+   - Real-time updates
+   - Memory-efficient storage
+   - Type-safe interfaces
 
-```typescript
-interface Logger {
-  debug(message: string, ...args: any[]): void;
-  info(message: string, ...args: any[]): void;
-  warn(message: string, error?: Error): void;
-  error(message: string, error?: Error): void;
-}
-```
+2. Metric Categories
+   - Pipeline metrics
+   - Topic-level metrics
+   - System health metrics
+   - Queue performance
 
-### 2. Metrics Collection
+3. Integration Points
+   - Stage metrics collection
+   - Queue monitoring
+   - Error tracking
+   - System health checks
 
-```typescript
-interface MetricsManager {
-  increment(metric: string): void;
-  gauge(metric: string, value: number): void;
-  timing(metric: string, timeMs: number): void;
-}
-```
-
-## Initialization Patterns
-
-### 1. Two-Phase Initialization
-
-The system uses a two-phase initialization pattern for handling circular dependencies:
-
-```typescript
-// Phase 1: Create services
-container.bind<ServiceA>(TYPES.ServiceA).to(ServiceA).inSingletonScope();
-container.bind<ServiceB>(TYPES.ServiceB).to(ServiceB).inSingletonScope();
-
-// Phase 2: Connect services
-const serviceA = container.get<ServiceA>(TYPES.ServiceA);
-const serviceB = container.get<ServiceB>(TYPES.ServiceB);
-serviceA.setDependency(serviceB);
-```
-
-Benefits:
-- Breaks circular dependencies
-- Clear initialization order
-- Maintainable dependency management
-- Verifiable initialization state
-
-### 2. Service Configuration Pattern
-
-Configuration objects are bound before their services:
-
-```typescript
-// First bind configuration
-container.bind<ServiceConfig>(TYPES.ServiceConfig).toConstantValue({
-  param1: value1,
-  param2: value2
-});
-
-// Then bind service that uses the config
-container.bind<Service>(TYPES.Service).to(Service).inSingletonScope();
-```
-
-Benefits:
-- Configuration available during service initialization
-- Type-safe configuration objects
-- Centralized configuration management
-- Easy to modify configuration values
-
-### 3. Service Initialization Order
-
-Services are initialized in a specific order to ensure dependencies are available:
-
-1. Core Services
-   - Logger
-   - ConfigManager
-   - Environment
-
-2. Infrastructure Services
-   - Storage
-   - DatabaseManager
-   - CircuitBreaker
-   - MetricsManager
-
-3. Twitter Services
-   - TwitterClient
-   - SearchStrategy
-   - TweetProcessor
-
-4. Telegram Services
-   - TelegramBot
-   - MessageQueue
-   - MessageSender
-
-5. Message Processing
-   - MessageProcessor
-   - MessageValidator
-   - TweetFormatter
-
-6. Validation Services
-   - DateValidator
-   - SearchConfig
-
-Benefits:
-- Predictable initialization sequence
-- Dependencies guaranteed to be available
-- Clear error messages for missing dependencies
-- Easy to add new services in correct order
-
-### 1. Asynchronous Initialization
-
-The implementation uses a clear initialization sequence to prevent race conditions:
-
-```typescript
-const initializeContainer = async () => {
-  // Initialize logger first
-  const logger = new ConsoleLogger();
-  container.bind(TYPES.Logger).toConstantValue(logger);
-
-  // Initialize rate limiter
-  const rateLimitedQueue = new RateLimitedQueue(logger, metricsManager);
-  await rateLimitedQueue.initialize();
-  container.bind(TYPES.RateLimitedQueue).toConstantValue(rateLimitedQueue);
-
-  // Create and initialize TwitterClient
-  const twitterClient = new TwitterClient(
-    logger,
-    circuitBreaker,
-    metricsManager,
-    configManager,
-    keyManager,
-    rateLimitedQueue
-  );
-  await twitterClient.initialize();
-  container.bind(TYPES.TwitterClient).toConstantValue(twitterClient);
-};
-```
-
-Benefits:
-- Prevents race conditions
-- Clear initialization order
-- Proper error handling during startup
-- Verifiable startup sequence
-
-These patterns provide a solid foundation for maintaining and extending the Twitter search functionality while ensuring code quality, testability, and reliability.
-
-### 9. API Key Management Pattern
-
-### 10. Topic-Specific Filter Management Pattern
-
-The TopicFilterManager implements a pattern for managing filters within Telegram topics:
-
+### Implementation
 ```typescript
 @injectable()
-class TopicFilterManager {
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.Database) private db: Database
-  ) {}
+export class MonitoringDashboard {
+  // Pipeline Metrics
+  private pipelineMetrics: {
+    stageMetrics: Record<string, {
+      successCount: number;
+      failureCount: number;
+      averageProcessingTime: number;
+    }>;
+    queueMetrics: QueueMetrics;
+  };
 
-  async getFilters(topicId: number): Promise<TopicFilter[]> {
-    return this.db.getFilters(topicId);
-  }
+  // Topic Metrics
+  private topicMetrics: Record<string, {
+    processed: number;
+    successful: number;
+    failed: number;
+    averageProcessingTime: number;
+  }>;
 
-  async addFilter(topicId: number, filter: TopicFilter): Promise<void> {
-    await this.validateFilter(filter);
-    await this.db.addFilter(topicId, filter);
-    this.logger.info(`Added filter to topic ${topicId}:`, filter);
-  }
-
-  async removeFilter(topicId: number, filter: TopicFilter): Promise<void> {
-    await this.db.removeFilter(topicId, filter);
-    this.logger.info(`Removed filter from topic ${topicId}:`, filter);
-  }
-
-  private async validateFilter(filter: TopicFilter): Promise<void> {
-    // Validation logic here
-  }
+  // System Health
+  private systemMetrics: {
+    rateLimiting: RateLimitMetrics;
+    circuitBreaker: CircuitBreakerMetrics;
+    memory: MemoryMetrics;
+  };
 }
 ```
 
-Benefits:
-- Dynamic filter management per topic
-- Persistent filter storage
-- Real-time configuration updates
-- Built-in validation
-- Audit trail of changes
-- Clear separation of concerns
-
-The RettiwtKeyManager implements a key rotation pattern for handling multiple API keys:
-
-```typescript
-@injectable()
-class RettiwtKeyManager {
-  private currentKeyIndex: number = 0;
-  private apiKeys: string[] = [];
-  private lastRotation: number = Date.now();
-  private rotationInterval: number = 60 * 1000; // 1 minute default
-
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.ConfigManager) private configManager: ConfigManager
-  ) {
-    this.initializeKeys();
-  }
-
-  public getCurrentKey(): string {
-    return this.apiKeys[this.currentKeyIndex];
-  }
-
-  public rotateKey(): string {
-    if (this.apiKeys.length <= 1) {
-      return this.getCurrentKey();
-    }
-
-    const now = Date.now();
-    if (now - this.lastRotation < this.rotationInterval) {
-      return this.getCurrentKey();
-    }
-
-    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
-    this.lastRotation = now;
-    return this.getCurrentKey();
-  }
-
-  public markKeyError(error: any): void {
-    if (error?.status === 429) {
-      this.rotateKey();
-    }
-  }
-}
-```
-
-Benefits:
-- Automatic key rotation on rate limits
-- Multiple API key support
-- Configurable rotation intervals
-- Error-triggered rotation
-- Metrics tracking for key usage
-
-Integration with TwitterClient:
-
-```typescript
-@injectable()
-class TwitterClient {
-  constructor(
-    @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.RateLimitedQueue) private queue: RateLimitedQueue,
-    @inject(TYPES.RettiwtKeyManager) private keyManager: RettiwtKeyManager
-  ) {}
-}
-```
-
-This pattern ensures efficient API key utilization and automatic handling of rate limits across multiple keys.
+### Benefits
+- Real-time system insights
+- Early problem detection
+- Performance optimization data
+- Resource usage tracking
+- Trend analysis capabilities
+- Proactive issue detection

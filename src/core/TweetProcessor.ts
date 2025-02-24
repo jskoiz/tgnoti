@@ -193,7 +193,7 @@ export class TweetProcessor {
   /**
    * Process a single tweet
    */
-  private async processSingleTweet(tweet: Tweet, topicId: string): Promise<{ sent: boolean; error: boolean }> {
+  public async processSingleTweet(tweet: Tweet, topicId: string): Promise<{ sent: boolean; error: boolean }> {
     const result = { sent: false, error: false };
     const startTime = Date.now();
 

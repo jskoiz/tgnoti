@@ -1,82 +1,89 @@
 # Active Development Context
 
-## Recent Changes
+## Current Session (2025-02-23)
 
-### Dependency Injection Improvements
-- Fixed missing service bindings for CircuitBreaker, Environment, MessageStorage, and SearchConfig
-- Resolved circular dependency between DateValidator and SearchConfig using two-phase initialization
-- Updated TweetFormatter binding to correctly use EnhancedMessageFormatter
-- Added proper configuration bindings for services
-- Documented initialization patterns in ADR 012
+### Focus Area
+Implementing new pipeline architecture to reduce complexity and improve debugging capabilities
 
-### Current System State
-- Application successfully initializes and runs with 13ms initialization time
-- Twitter Notifier operational with 4 API keys
-- Tweet processing cycles active and processing correctly
-- Search windows properly validated (5-day window working)
-- Filter building operational with complex filters
-- System time validation passing
-- Database schema initialized
-- Metrics collection active and reporting:
-  * notifier.init_time: 13ms
-  * search.filters.complex: 1
-  * search.filter_build_time: 0ms
-  * twitter.search.attempt: 1
-  * date.validation.success: 2
+### Recent Changes
+1. Created new pipeline architecture:
+   - Implemented TweetProcessingPipeline orchestrator
+   - Created base pipeline types and interfaces
+   - Implemented pipeline stages:
+     - FetchStage: Responsible for tweet retrieval
+     - ValidationStage: Handles validation and deduplication
+     - FilterStage: Manages content filtering
+     - FormatStage: Handles message formatting
+     - SendStage: Manages Telegram message delivery
 
-### Service Health
-- CircuitBreaker: Operational
-- Environment: Validated successfully
-- MessageStorage: Initialized
-- TweetFormatter: Properly bound
-- SearchConfig: Connected to DateValidator and providing correct search windows (2025-02-18 to 2025-02-23)
-- Twitter API: Connected with 4 API keys and processing searches
-- Database: Schema initialized
-- DateValidator: Validating times correctly (2025-02-23T21:42:03.041Z)
-- FilterBuilder: Creating complex filters successfully with parameters:
-  * Language: en
-  * Users: TradeWithPhoton
-  * Date Range: 5 days
-  * Links: false
-  * Retweets: true
-  * Quotes: true
+2. Improved error handling:
+   - Added stage-specific error handling
+   - Implemented comprehensive logging
+   - Added performance metrics tracking
 
-## Next Steps
+3. Enhanced state management:
+   - Clear stage progression
+   - Improved context passing
+   - Better error recovery
 
-### Short Term
-1. Monitor the system for any remaining dependency issues
-2. Add validation tests for dependency injection configuration
-3. Consider implementing dependency graph visualization
-4. Review and potentially optimize service initialization order
+4. Implemented Monitoring Dashboard:
+   - Created MonitoringDashboard class for centralized monitoring
+   - Added real-time pipeline metrics tracking
+   - Implemented topic-level metrics monitoring
+   - Added system health monitoring
+   - Integrated with SendStage for metrics collection
+   - Added queue performance tracking
 
-### Medium Term
-1. Implement automated tests for dependency injection
-2. Create service dependency documentation
-3. Consider adding health checks for initialized services
-4. Review and update error handling for initialization failures
+5. Migration Infrastructure:
+   - Created MigrationManager for controlled migration
+   - Implemented parallel processing capability
+   - Added validation and comparison logic
+   - Set up metrics tracking
+   - Created migration validator script
+    - Added migration-specific validation mode
+   - Fixed FetchStage implementation to handle existing data
 
-### Long Term
-1. Consider implementing a more robust service lifecycle management system
-2. Plan for potential service discovery implementation
-3. Evaluate need for dynamic service configuration
-4. Consider containerization strategy for services
+### Current Goals
+1. ✅ Fix remaining type issues in SendStage
+2. ❌ Implement pipeline integration tests (Decided not to implement)
+3. ✅ Add monitoring dashboards
+4. ✅ Create migration infrastructure
+5. ✅ Fix ValidationStage issues during migration
 
-## Known Issues
-1. Fixed: Search filter was creating redundant conditions by adding fromUsers to includeWords array
-   - Impact: Could cause API hangs due to duplicate search criteria
-   - Resolution: Removed automatic addition of fromUsers to includeWords when no keywords provided
+### Open Questions
+1. ✅ Should we add more granular metrics for each stage?
+   - Implemented comprehensive metrics in MonitoringDashboard
+2. ✅ Do we need additional validation checks in any stages?
+   - Identified issue with ValidationStage during migration
+   - Need to modify validation logic for migration phase
+3. ✅ Should we implement circuit breakers for external services? (Implemented in SendStage)
 
-## Recent Metrics
-- Initialization time: 13ms
-- Tweet processing cycles: Active and successful
-- Service initialization: Successful
-- Configuration validation: Passed
-- Search filter building: Working correctly
-- Date validation: Passing all checks
+### Next Steps
+1. ✅ Complete SendStage implementation
+2. ❌ Add comprehensive tests (Decided not to implement)
+3. ✅ Create monitoring dashboard
+4. ✅ Create migration validator
+5. Fix ValidationStage migration issues:
+   - ✅ Added migration-specific validation mode to handle duplicate tweets
 
-## Documentation Updates
-- Added ADR 012 for dependency injection improvements
-- Updated systemPatterns.md with new initialization patterns
-- Current documentation reflects latest system architecture and operational status
+### Technical Decisions
+1. Using pipeline pattern for clear processing flow
+2. Implementing comprehensive metrics
+3. Adding strong typing throughout
+4. Using dependency injection for better testing
+5. Created centralized monitoring dashboard for better observability
+6. Integrated monitoring with SendStage for real-time metrics
+7. Implemented parallel processing for migration validation
 
-Last Updated: 2/23/2025 11:42 AM HST
+### Blockers
+✅ All previous blockers resolved
+
+### Notes
+- Pipeline architecture significantly improves debugging capabilities
+- Each stage has clear responsibilities
+- Error handling is more robust
+- Metrics will help identify bottlenecks
+- Monitoring dashboard provides real-time insights into system health
+- Queue performance tracking helps optimize message delivery
+- Migration validation shows promising results after ValidationStage fixes
+- Ready to proceed with full migration testing

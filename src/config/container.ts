@@ -31,7 +31,15 @@ import { MetricsManager } from '../utils/MetricsManager.js';
 import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
 import { FilterPipeline } from '../core/FilterPipeline.js';
 import { TwitterNotifier } from '../core/TwitterNotifier.js';
+import { MonitoringDashboard } from '../utils/MonitoringDashboard.js';
 import { DateValidator } from '../utils/dateValidation.js';
+import { TweetProcessingPipeline } from '../core/pipeline/TweetProcessingPipeline.js';
+import { MigrationManager } from '../utils/MigrationManager.js';
+import { FetchStage } from '../core/pipeline/stages/FetchStage.js';
+import { ValidationStage } from '../core/pipeline/stages/ValidationStage.js';
+import { FilterStage } from '../core/pipeline/stages/FilterStage.js';
+import { FormatStage } from '../core/pipeline/stages/FormatStage.js';
+import { SendStage } from '../core/pipeline/stages/SendStage.js';
 import TelegramBotApi from 'node-telegram-bot-api';
 import { TelegramQueueConfig } from '../types/telegram.js';
 import path from 'path';
@@ -58,6 +66,8 @@ export function createContainer(): Container {
   container.bind<ErrorHandler>(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
   container.bind<CircuitBreaker>(TYPES.CircuitBreaker).to(CircuitBreaker).inSingletonScope();
   container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
+  container.bind<MonitoringDashboard>(TYPES.MonitoringDashboard).to(MonitoringDashboard).inSingletonScope();
+  container.bind<MigrationManager>(TYPES.MigrationManager).to(MigrationManager).inSingletonScope();
   container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
 
   // Twitter Related
@@ -68,6 +78,14 @@ export function createContainer(): Container {
   container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
   container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
   container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
+  container.bind<TweetProcessingPipeline>(TYPES.TweetProcessingPipeline).to(TweetProcessingPipeline).inSingletonScope();
+  
+  // Pipeline Stages
+  container.bind<FetchStage>(TYPES.FetchStage).to(FetchStage).inSingletonScope();
+  container.bind<ValidationStage>(TYPES.ValidationStage).to(ValidationStage).inSingletonScope();
+  container.bind<FilterStage>(TYPES.FilterStage).to(FilterStage).inSingletonScope();
+  container.bind<FormatStage>(TYPES.FormatStage).to(FormatStage).inSingletonScope();
+  container.bind<SendStage>(TYPES.SendStage).to(SendStage).inSingletonScope();
   container.bind<RettiwtKeyManager>(TYPES.RettiwtKeyManager).to(RettiwtKeyManager).inSingletonScope();
 
   // Telegram Related
@@ -121,6 +139,17 @@ export function initializeContainer(): Container {
     console.error('Failed to initialize database:', error);
     process.exit(1);
   });
+  
+  // Initialize pipeline
+  const pipeline = container.get<TweetProcessingPipeline>(TYPES.TweetProcessingPipeline);
+  const fetchStage = container.get<FetchStage>(TYPES.FetchStage);
+  const validationStage = container.get<ValidationStage>(TYPES.ValidationStage);
+  const filterStage = container.get<FilterStage>(TYPES.FilterStage);
+  const formatStage = container.get<FormatStage>(TYPES.FormatStage);
+  const sendStage = container.get<SendStage>(TYPES.SendStage);
+  
+  // Add stages in order
+  [fetchStage, validationStage, filterStage, formatStage, sendStage].forEach(stage => pipeline.addStage(stage));
 
   return container;
 }
