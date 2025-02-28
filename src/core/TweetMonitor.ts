@@ -217,15 +217,30 @@ export class TweetMonitor {
               
               // Add filter for tweet age - only accept tweets that are actually within our search window
               const tweetDate = new Date(tweet.createdAt);
-              if (tweetDate < this.currentSearchStartTime || tweetDate > searchEndTime) {
-                this.logger.debug('Tweet outside search window, skipping', {
-                  tweetId: tweet.id,
-                  tweetDate: tweetDate.toISOString(),
-                  searchStartTime: this.currentSearchStartTime.toISOString(),
-                  searchEndTime: searchEndTime.toISOString()
+              const now = new Date();
+              const tweetAgeMinutes = (searchEndTime.getTime() - tweetDate.getTime()) / (60 * 1000);
+              const configuredWindow = this.initialWindowMinutes;
+              
+              // Enforce a strict time window check
+              if (tweetAgeMinutes > configuredWindow) {
+                this.logger.info('⚠️ Tweet too old for configured window, skipping', {
+                  tweetAgeMinutes: tweetAgeMinutes.toFixed(2),
+                  configuredWindow,
+                  tweetId: tweet.id
                 });
                 continue;
               }
+              
+              this.logger.debug('Tweet age analysis', {
+                tweetId: tweet.id,
+                tweetDate: tweetDate.toISOString(),
+                searchStartTime: this.currentSearchStartTime.toISOString(),
+                searchEndTime: searchEndTime.toISOString(),
+                tweetAgeMinutes: tweetAgeMinutes.toFixed(2),
+                windowSizeMinutes: ((searchEndTime.getTime() - this.currentSearchStartTime.getTime()) / (60 * 1000)).toFixed(2),
+                configuredWindow
+              });
+              
               
               // Check if we've seen this tweet in the current batch
               if (seenTweetIds.has(tweet.id)) {

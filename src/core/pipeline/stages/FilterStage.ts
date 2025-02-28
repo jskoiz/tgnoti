@@ -6,6 +6,7 @@ import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { ErrorHandler } from '../../../utils/ErrorHandler.js';
 import { TopicFilterManager } from '../../../telegram/bot/TopicFilterManager.js';
 import { UsernameHandler } from '../../../utils/usernameHandler.js';
+import { SearchConfig } from '../../../config/searchConfig.js';
 
 @injectable()
 export class FilterStage implements PipelineStage<TweetContext, TweetContext> {
@@ -16,7 +17,8 @@ export class FilterStage implements PipelineStage<TweetContext, TweetContext> {
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.ErrorHandler) private errorHandler: ErrorHandler,
     @inject(TYPES.TopicFilterManager) private filterManager: TopicFilterManager,
-    @inject(TYPES.UsernameHandler) private usernameHandler: UsernameHandler
+    @inject(TYPES.UsernameHandler) private usernameHandler: UsernameHandler,
+    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig
   ) {}
 
   /**
@@ -30,6 +32,30 @@ export class FilterStage implements PipelineStage<TweetContext, TweetContext> {
     });
 
     try {
+      // Check tweet age first
+      const tweetDate = new Date(context.tweet.createdAt);
+      const now = new Date();
+      const tweetAgeMinutes = (now.getTime() - tweetDate.getTime()) / (60 * 1000);
+      const configuredWindow = this.searchConfig.getSearchWindowMinutes();
+      
+      this.logger.debug('Tweet age check', {
+        tweetId: context.tweet.id,
+        tweetDate: tweetDate.toISOString(),
+        tweetAgeMinutes: tweetAgeMinutes.toFixed(2),
+        configuredWindow
+      });
+
+      if (tweetAgeMinutes > configuredWindow) {
+        return {
+          success: false,
+          data: context,
+          error: new Error(`Tweet too old: ${tweetAgeMinutes.toFixed(2)} minutes`),
+          metadata: {
+            reason: 'tweet_too_old'
+          }
+        };
+      }
+
       // Get topic-specific filters
       const topicFilters = await this.filterManager.getFilters(Number(context.topicId));
       

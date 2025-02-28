@@ -8,6 +8,7 @@ import { UsernameHandler } from '../../../utils/usernameHandler.js';
 import { EventBus } from '../EventBus.js';
 import { TweetEvent, ValidatedTweetEvent, FilteredTweetEvent, TwitterEvent, ErrorEvent } from '../EventTypes.js';
 import { Storage } from '../../storage/storage.js';
+import { SearchConfig } from '../../../config/searchConfig.js';
 
 /**
  * Consolidated handler for tweet eligibility (validation + filtering)
@@ -22,7 +23,8 @@ export class EligibilityHandler {
     @inject(TYPES.TopicFilterManager) private filterManager: TopicFilterManager,
     @inject(TYPES.UsernameHandler) private usernameHandler: UsernameHandler,
     @inject(TYPES.Storage) private storage: Storage,
-    @inject(TYPES.EventBus) private eventBus: EventBus
+    @inject(TYPES.EventBus) private eventBus: EventBus,
+    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig
   ) {
     // Subscribe to tweet events
     this.eventBus.subscribe(this.handleTweetEvent.bind(this), {
@@ -171,6 +173,42 @@ export class EligibilityHandler {
     const filterStartTime = Date.now();
     
     try {
+      // Check tweet age first
+      const tweetDate = new Date(event.tweet.createdAt);
+      const now = new Date();
+      const tweetAgeMinutes = (now.getTime() - tweetDate.getTime()) / (60 * 1000);
+      const configuredWindow = this.searchConfig.getSearchWindowMinutes();
+      
+      this.logger.debug('Tweet age check', {
+        tweetId: event.tweet.id,
+        tweetDate: tweetDate.toISOString(),
+        tweetAgeMinutes: tweetAgeMinutes.toFixed(2),
+        configuredWindow
+      });
+
+      if (tweetAgeMinutes > configuredWindow) {
+        return {
+          id: `filtered_${event.id}`,
+          timestamp: new Date(),
+          type: 'filtered_tweet',
+          tweet: event.tweet,
+          topicId: event.topicId,
+          metadata: {
+            ...event.metadata,
+            filter: {
+              matched: false,
+              rules: [],
+              reason: `tweet_too_old (${tweetAgeMinutes.toFixed(2)} minutes)`,
+              filterDurationMs: Date.now() - filterStartTime
+            }
+          },
+          isValid: event.isValid,
+          validationReason: event.validationReason,
+          matched: false,
+          rules: []
+        };
+      }
+
       // Get topic-specific filters
       const topicFilters = await this.filterManager.getFilters(Number(event.topicId));
       

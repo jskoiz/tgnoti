@@ -115,6 +115,25 @@ export class SearchStrategy {
         paginationToken: searchConfig.cursor?.nextToken
       });
 
+      // Log detailed date analysis for each tweet
+      const requestedStartTime = searchConfig.startTime ? new Date(searchConfig.startTime) : null;
+      const requestedEndTime = searchConfig.endTime ? new Date(searchConfig.endTime) : null;
+      
+      response.data.forEach(tweet => {
+        const tweetDate = new Date(tweet.createdAt);
+        const tweetAgeMinutes = requestedEndTime ? 
+          (requestedEndTime.getTime() - tweetDate.getTime()) / (60 * 1000) : 
+          (new Date().getTime() - tweetDate.getTime()) / (60 * 1000);
+        
+        this.logger.debug('Tweet date analysis from API', {
+          tweetId: tweet.id,
+          tweetDate: tweetDate.toISOString(),
+          requestedStartTime: requestedStartTime?.toISOString(),
+          requestedEndTime: requestedEndTime?.toISOString(),
+          tweetAgeMinutes: tweetAgeMinutes.toFixed(2)
+        });
+      });
+
       // Sort tweets by creation date, newest first
       response.data.sort((a, b) => {
         const dateA = new Date(a.createdAt);
