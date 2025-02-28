@@ -1,59 +1,70 @@
-export const TYPES = {
-  // Core Services
+const TYPES = {
+  // Core services
   Logger: Symbol.for('Logger'),
+  LogService: Symbol.for('LogService'),
+  LoggerFactory: Symbol.for('LoggerFactory'),
   ConfigManager: Symbol.for('ConfigManager'),
   Storage: Symbol.for('Storage'),
   DatabaseManager: Symbol.for('DatabaseManager'),
+  MongoDBManager: Symbol.for('MongoDBManager'),
   ErrorHandler: Symbol.for('ErrorHandler'),
   CircuitBreaker: Symbol.for('CircuitBreaker'),
+  RettiwtErrorHandler: Symbol.for('RettiwtErrorHandler'),
   CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
+  UsernameHandler: Symbol.for('UsernameHandler'),
   MetricsManager: Symbol.for('MetricsManager'),
+  EventBus: Symbol.for('EventBus'),
   MonitoringDashboard: Symbol.for('MonitoringDashboard'),
-  
-  // Twitter Related
+
+  // Twitter services
   TwitterClient: Symbol.for('TwitterClient'),
-  TwitterNotifier: Symbol.for('TwitterNotifier'),
-  RettiwtSearchBuilder: Symbol.for('RettiwtSearchBuilder'),
   RettiwtKeyManager: Symbol.for('RettiwtKeyManager'),
-  SearchStrategy: Symbol.for('SearchStrategy'),
+  RettiwtSearchBuilder: Symbol.for('RettiwtSearchBuilder'),
   SearchCacheManager: Symbol.for('SearchCacheManager'),
-  TweetProcessor: Symbol.for('TweetProcessor'),
-  TweetMonitor: Symbol.for('TweetMonitor'),
-  TweetFormatter: Symbol.for('TweetFormatter'),
-  
-  // Telegram Related
+  SearchStrategy: Symbol.for('SearchStrategy'),
+
+  // Telegram services
   TelegramBot: Symbol.for('TelegramBot'),
+  TelegramBotService: Symbol.for('TelegramBotService'),
   TelegramMessageQueue: Symbol.for('TelegramMessageQueue'),
   TelegramMessageSender: Symbol.for('TelegramMessageSender'),
-  TelegramQueueConfig: Symbol.for('TelegramQueueConfig'),
-  
-  // Message Processing
-  MessageProcessor: Symbol.for('MessageProcessor'),
-  MessageValidator: Symbol.for('MessageValidator'),
-  MessageFormatter: Symbol.for('MessageFormatter'),
-  TweetProcessingPipeline: Symbol.for('TweetProcessingPipeline'),
-  MigrationManager: Symbol.for('MigrationManager'),
-  FilterPipeline: Symbol.for('FilterPipeline'),
-  MessageStorage: Symbol.for('MessageStorage'),
-  
-  // Topic Management
   TopicManager: Symbol.for('TopicManager'),
   TopicFilterManager: Symbol.for('TopicFilterManager'),
-  
+  MessageFormatter: Symbol.for('MessageFormatter'),
+  MessageStorage: Symbol.for('MessageStorage'),
+
+  // Pipeline components
+  TweetProcessingPipeline: Symbol.for('TweetProcessingPipeline'),
+  FetchStage: Symbol.for('FetchStage'),
+  FilterStage: Symbol.for('FilterStage'),
+  ValidationStage: Symbol.for('ValidationStage'),
+  FormatStage: Symbol.for('FormatStage'),
+  SendStage: Symbol.for('SendStage'),
+
+  // Queue management
+  RateLimitedQueue: Symbol.for('RateLimitedQueue'),
+  MessageProcessor: Symbol.for('MessageProcessor'),
+
   // Configuration
+  LoggingConfig: Symbol.for('LoggingConfig'),
+  PipelineConfig: Symbol.for('PipelineConfig'),
   Environment: Symbol.for('Environment'),
   SearchConfig: Symbol.for('SearchConfig'),
-  DateValidator: Symbol.for('DateValidator'),
-  
-  // System
+  TweetTrackingConfig: Symbol.for('TweetTrackingConfig'),
+  TelegramConfig: Symbol.for('TelegramConfig'),
+  TelegramQueueConfig: Symbol.for('TelegramQueueConfig'),
   BasePath: Symbol.for('BasePath'),
-  RateLimitedQueue: Symbol.for('RateLimitedQueue'),
+  DateValidator: Symbol.for('DateValidator'),
+  TweetFormatter: Symbol.for('TweetFormatter'),
+  MessageValidator: Symbol.for('MessageValidator'),
+  TwitterNotifier: Symbol.for('TwitterNotifier'),
+  TweetMonitor: Symbol.for('TweetMonitor'),
   
-  // Pipeline Stages
-  FetchStage: Symbol.for('FetchStage'),
-  ValidationStage: Symbol.for('ValidationStage'),
-  FilterStage: Symbol.for('FilterStage'),
-  FormatStage: Symbol.for('FormatStage'),
-  SendStage: Symbol.for('SendStage')
-  
+  // Event system
+  EventProcessor: Symbol.for('EventProcessor'),
+  EligibilityHandler: Symbol.for('EligibilityHandler'),
+  FormatterHandler: Symbol.for('FormatterHandler'),
+  SenderHandler: Symbol.for('SenderHandler')
 };
+
+export { TYPES };

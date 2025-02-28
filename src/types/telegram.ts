@@ -1,4 +1,6 @@
 import { Message } from 'node-telegram-bot-api';
+import { TopicConfig } from './topics.js';
+import { Tweet } from './twitter.js';
 
 // Existing types
 export interface TelegramBotConfig {
@@ -25,7 +27,9 @@ export interface FormattedMessage {
 export interface TweetMessageConfig {
   tweet: any;
   quotedTweet?: any;
+  replyToTweet?: any;
   showSummarizeButton?: boolean;
+  mediaHandling?: 'inline' | 'attachment';
   translationMessage?: string;
 }
 
@@ -38,8 +42,10 @@ export interface TweetFormatter {
 export interface QueuedMessage {
   chatId: number;
   threadId?: number;
+  tweetId?: string;  // Made optional since not all messages are tweets
   content: string;
   messageOptions: any;
+  tweetMetadata?: TweetMetadata;  // Added to pass tweet metadata through the queue
   priority: number;
   retryCount: number;
   firstAttempt: Date;
@@ -61,13 +67,14 @@ export interface TelegramQueueConfig {
   baseDelayMs: number; // Base delay between messages
   rateLimitWindowMs: number; // Time window for rate limiting
   maxMessagesPerWindow: number; // Maximum messages allowed in window
+  maxDelayMs: number; // Maximum delay between messages (for exponential backoff)
   maxRetries: number; // Maximum number of retry attempts
   maxQueueSize: number; // Maximum size of the queue
   persistenceEnabled: boolean; // Whether to persist queue to disk
 }
 
 export interface ITelegramMessageQueue {
-  queueMessage(message: Omit<QueuedMessage, 'id' | 'firstAttempt' | 'retryCount'>): Promise<string>;
+  queueMessage(message: Omit<QueuedMessage, 'id' | 'firstAttempt' | 'retryCount' | 'lastAttempt' | 'nextAttemptTime'>): Promise<string>;
   getQueueLength(): number;
   getMetrics(): TelegramQueueMetrics;
   clearQueue(): Promise<void>;
@@ -98,12 +105,13 @@ export type SendMessageResult = {
   retryAfter?: number;
 };
 
-export interface TopicConfig {
-  id: string;
-  name: string;
-  fallbackId?: string;
-  isRequired?: boolean;
+export interface TweetMetadata {
+  tweet: Tweet;
+  matchedTopic?: string;
+  type: 'original' | 'reply' | 'quote';
 }
 
-// Topic configuration moved to src/config/topicConfig.ts
-export { TOPIC_CONFIG } from '../config/topicConfig.js';
+export interface ITelegramMessageSender {
+  sendMessage(chatId: number, text: string, options?: any, metadata?: TweetMetadata): Promise<SendMessageResult>;
+  sendPhoto(chatId: number, photo: string, options?: any, metadata?: TweetMetadata): Promise<SendMessageResult>;
+};

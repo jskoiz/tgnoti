@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
-import { Logger } from '../types/logger.js';
-import { MetricsManager } from './MetricsManager.js';
+import { LogService } from '../logging/LogService.js';
+import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { TYPES } from '../types/di.js';
 
 // Base error class for all application errors
@@ -86,7 +86,7 @@ export const ErrorCodes = {
 @injectable()
 export class ErrorHandler {
   constructor(
-    @inject(TYPES.Logger) private logger: Logger,
+    @inject(TYPES.LogService) private logService: LogService,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager
   ) {}
 
@@ -94,19 +94,19 @@ export class ErrorHandler {
    * Handle any error with proper logging and metrics
    */
   handleError(error: unknown, context?: string): void {
-    const errorContext = context ? ` [${context}]` : '';
+    const component = context || 'unknown';
+    const logger = this.logService.child(component);
     
     if (error instanceof AppError) {
-      this.logger.error(`${error.code}${errorContext}: ${error.message}`, error.context);
+      logger.error(error.message, error, { 
+        code: error.code,
+        context: error.context
+      });
       this.metrics.increment(`errors.${error.code.toLowerCase()}`);
     } else {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`UNKNOWN_ERROR${errorContext}: ${errorMessage}`);
+      logger.error(errorMessage, error instanceof Error ? error : undefined);
       this.metrics.increment('errors.unknown');
-    }
-
-    if (error instanceof Error && error.stack) {
-      this.logger.debug('Stack trace:', error.stack);
     }
   }
 
@@ -114,32 +114,50 @@ export class ErrorHandler {
    * Handle API-specific errors with proper recovery strategies
    */
   handleApiError(error: unknown, apiName: string): void {
+    const logger = this.logService.child(apiName);
+    
     if (error instanceof ApiError) {
       switch (error.statusCode) {
         case 401:
         case 403:
-          this.logger.error(`${apiName} authentication failed: ${error.message}`, error.context);
+          logger.error(`Authentication failed: ${error.message}`, error, { 
+            context: error.context,
+            statusCode: error.statusCode
+          });
           this.metrics.increment(`api.${apiName.toLowerCase()}.auth_error`);
           process.exit(1);
           break;
           
         case 429:
-          this.logger.warn(`${apiName} rate limit exceeded: ${error.message}`, error.context);
+          logger.warn(
+            `Rate limit exceeded: ${error.message}`,
+            error,
+            {
+              statusCode: error.statusCode,
+              ...(error.context && { context: error.context })
+            }
+          );
           this.metrics.increment(`api.${apiName.toLowerCase()}.rate_limit`);
           break;
           
         case 404:
-          this.logger.warn(`${apiName} resource not found: ${error.message}`, error.context);
+          logger.warn(`Resource not found: ${error.message}`, error, {
+            statusCode: error.statusCode,
+            ...(error.context && { context: error.context })
+          });
           this.metrics.increment(`api.${apiName.toLowerCase()}.not_found`);
           break;
           
         default:
-          this.logger.error(`${apiName} error (${error.statusCode}): ${error.message}`, error.context);
+          logger.error(`API error (${error.statusCode}): ${error.message}`, error, { 
+            context: error.context,
+            statusCode: error.statusCode
+          });
           this.metrics.increment(`api.${apiName.toLowerCase()}.error`);
       }
     } else {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`${apiName} unknown error: ${errorMessage}`);
+      logger.error(`Unknown error: ${errorMessage}`, error instanceof Error ? error : undefined);
       this.metrics.increment(`api.${apiName.toLowerCase()}.unknown`);
     }
   }

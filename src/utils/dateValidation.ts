@@ -3,7 +3,7 @@ import { Logger } from '../types/logger.js';
 import { TYPES } from '../types/di.js';
 import { Tweet } from '../types/twitter.js';
 import axios from 'axios';
-import { MetricsManager } from './MetricsManager.js';
+import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { SearchConfig } from '../config/searchConfig.js';
 import { IDateValidator } from '../types/dateValidator.js';
 
@@ -91,21 +91,21 @@ export class DateValidator implements IDateValidator {
    * Validates the current system time
    */
   async validateSystemTime(): Promise<void> {
-    const now = await this.getOnlineTime();
-    const futureDays = this.searchConfig.getFutureDays();
-    const maxFutureDate = new Date(now.getTime() + (futureDays * 24 * 60 * 60 * 1000));
-
-    if (now > maxFutureDate) {
+    const onlineTime = await this.getOnlineTime();
+    const systemTime = new Date();
+    
+    // Check if system time is too far in the future
+    const maxAllowedTime = new Date(onlineTime.getTime() + (24 * 60 * 60 * 1000)); // Allow max 1 day ahead
+    if (systemTime > maxAllowedTime) {
       const error = new DateValidationError(
-        `System time ${now.toISOString()} is too far in the future. ` +
-        `Must not be more than ${futureDays} days ahead.`
+        `System time ${systemTime.toISOString()} is too far ahead of online time ${onlineTime.toISOString()}`
       );
       this.logger.error('System time validation failed:', error);
-      this.metrics.increment('date.validation.errors');
       throw error;
     }
 
-    this.logger.debug(`System time validated: ${now.toISOString()}`);
+    this.logger.info(`System time validated: ${systemTime.toISOString()}`);
+    this.logger.debug(`Online time reference: ${onlineTime.toISOString()}`);
     this.metrics.increment('date.validation.success');
   }
 
@@ -114,8 +114,14 @@ export class DateValidator implements IDateValidator {
    */
   async validateSearchWindow(startDate: Date, endDate: Date): Promise<void> {
     const now = await this.getOnlineTime();
-    const pastDays = this.searchConfig.getPastDays();
-    const futureDays = this.searchConfig.getFutureDays();
+    
+    // Get configuration values with fallbacks to ensure backward compatibility
+    // This handles both the old (pastDays/futureDays) and new (windowMinutes) configurations
+    const pastDays = this.searchConfig.getPastDays ? 
+      this.searchConfig.getPastDays() : 
+      7; // Default to 7 days if method doesn't exist
+    const futureDays = this.searchConfig.getFutureDays ? 
+      this.searchConfig.getFutureDays() : 1; // Default to 1 day if method doesn't exist
 
     if (startDate > endDate) {
       const error = new DateValidationError(
@@ -161,10 +167,28 @@ export class DateValidator implements IDateValidator {
    */
   async validateTweetDate(tweet: Tweet): Promise<boolean> {
     const tweetDate = new Date(tweet.createdAt);
+    const windowMinutes = this.searchConfig.getSearchWindowMinutes();
     const now = await this.getOnlineTime();
-    const pastDays = this.searchConfig.getPastDays();
-    const futureDays = this.searchConfig.getFutureDays();
     
+    // Get configuration values with fallbacks to ensure backward compatibility
+    // This handles both the old (pastDays/futureDays) and new (windowMinutes) configurations
+    const pastDays = this.searchConfig.getPastDays ? 
+      this.searchConfig.getPastDays() : 
+      7; // Default to 7 days if method doesn't exist
+    const futureDays = this.searchConfig.getFutureDays ? 
+      this.searchConfig.getFutureDays() : 1; // Default to 1 day if method doesn't exist
+    
+    // Log the validation details
+    this.logger.debug('Tweet date validation', {
+      tweetId: tweet.id,
+      tweetDate: tweetDate.toISOString(),
+      currentTime: now.toISOString(),
+      configuredWindow: {
+        minutes: windowMinutes,
+        pastDays,
+        futureDays
+      }
+    });
     // Calculate valid date range
     const maxPastDate = new Date(now.getTime() - (pastDays * 24 * 60 * 60 * 1000));
     const maxFutureDate = new Date(now.getTime() + (futureDays * 24 * 60 * 60 * 1000));

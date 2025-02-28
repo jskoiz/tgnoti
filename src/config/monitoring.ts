@@ -1,273 +1,69 @@
-import { MonitoringType, TopicConfig } from './topics.js';
-import { RetryPolicy, DEFAULT_RETRY_POLICY } from './retry.js';
-import { getFilterStrategy, matchesTopic } from './filterStrategies.js';
+import { RetryPolicy } from './environment.js';
 
-/**
- * Twitter API field configuration
- */
-export interface TwitterFields {
-  tweet: string[];
-  expansions: string[];
-  media: string[];
-  user: string[];
+export interface CircuitBreakerConfig {
+  failureThreshold: number;
+  resetTimeout: number;
+  halfOpenTimeout: number;
 }
 
-/**
- * Polling configuration
- */
-export interface PollingConfig {
-  intervalMinutes: number;
-  maxResults: number;
-  timeWindowHours: number;
-  batchSize: number;
-  retry: RetryPolicy;
+export interface MonitoringAccount {
+  topicId: number;
+  account: string;
 }
 
-/**
- * Complete monitoring configuration
- */
-export interface MonitoringConfig {
-  groupId: string;
-  topics: Record<string, TopicConfig>;
-  polling: PollingConfig;
-  fields: TwitterFields;
-}
-
-/**
- * Default monitoring configuration
- */
-export const monitoringConfig: MonitoringConfig = {
-  groupId: "-1002379334714",
-  topics: {
-    trojan: {
-      id: 381,
-      name: "Trojan Monitor",
-      enabled: true,
-      type: MonitoringType.Mention,
-      filters: [{
-        mentions: ["@TrojanOnSolana", "@TrojanTrading"],
-        accounts: [],
-        excludeRetweets: true,
-        excludeQuotes: false,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "(TrojanOnSolana OR TrojanTrading OR \"Trojan Trading\" OR \"Trojan On Solana\")"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    trojanSolana: {
-      id: 5026,
-      name: "Trojan Solana Monitor",
-      enabled: true,
-      type: MonitoringType.Mention,
-      filters: [{
-        mentions: ["@TrojanOnSolana"],
-        accounts: [],
-        excludeRetweets: true,
-        excludeQuotes: false,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "(TrojanOnSolana OR \"Trojan On Solana\")"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    competitor: {
-      id: 377,
-      name: "Competitor Monitor",
-      enabled: true,
-      type: MonitoringType.Mention,
-      filters: [{
-        mentions: [],
-        accounts: [],
-        excludeRetweets: true,
-        excludeQuotes: false,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "(tradewithPhoton OR bullx_io OR BloomTradingBot OR bonkbot_io)"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    kol: {
-      id: 379,
-      name: "KOL Monitor",
-      enabled: true,
-      type: MonitoringType.Account,
-      filters: [{
-        accounts: ["@reethmos"],
-        mentions: [],
-        excludeRetweets: true,
-        excludeQuotes: true,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "from:reethmos"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    competitorTweets: {
-      id: 885,
-      name: "Competitor Tweets",
-      enabled: true,
-      type: MonitoringType.Account,
-      filters: [{
-        accounts: [
-          "@bullx_io",
-          "@BloomTradingBot",
-          "@bonkbot_io"
-        ],
-        mentions: [],
-        excludeRetweets: true,
-        excludeQuotes: false,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "(from:bullx_io OR from:BloomTradingBot OR from:bonkbot_io)"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    tradeonnova: {
-      id: 5574,
-      name: "TradeOnNova Monitor",
-      enabled: true,
-      type: MonitoringType.Account,
-      filters: [{
-        accounts: ["@TradeonNova"],
-        mentions: ["@TradeonNova"],
-        excludeRetweets: true,
-        excludeQuotes: false,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "(from:TradeonNova OR TradeonNova)"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        }
-      }
-    },
-    tradewithphoton: {
-      id: 5572,
-      name: "TradeWithPhoton Monitor",
-      enabled: true,
-      type: MonitoringType.Account,
-      filters: [{
-        accounts: ["@TradeWithPhoton"],
-        mentions: [],
-        excludeRetweets: true,
-        excludeQuotes: true,
-        excludeReplies: false,
-        excludeUsernames: [],
-        excludePatterns: [],
-        searchQuery: "from:TradeWithPhoton"
-      }],
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      notification: {
-        enabled: true,
-        format: {
-          includeMetrics: true,
-          includeLinks: true
-        },
-        throttle: { maxPerHour: 100 }
-      }
-    }
+export const MONITORING_ACCOUNTS: MonitoringAccount[] = [
+  {
+    topicId: 5572,
+    account: 'tradewithPhoton'
   },
-  polling: {
-    intervalMinutes: 0.5, // 30 seconds
-    maxResults: 50,
-    timeWindowHours: 24, // 1 day
-    batchSize: 50,
-    retry: {
-      maxAttempts: 3,
-      baseDelay: 1000,
-      maxDelay: 60000,
-      jitter: true
-    }
+  {
+    topicId: 5573,
+    account: 'bullx_io'
   },
-  fields: {
-    tweet: [
-      "author_id",
-      "created_at",
-      "text",
-      "referenced_tweets",
-      "conversation_id",
-      "attachments"
-    ],
-    expansions: [
-      "referenced_tweets.id",
-      "author_id",
-      "attachments.media_keys",
-      "referenced_tweets.id.author_id"
-    ],
-    media: [
-      "type",
-      "url",
-      "preview_image_url",
-      "alt_text"
-    ],
-    user: [
-      "id",
-      "name",
-      "username",
-      "created_at",
-      "public_metrics",
-      "profile_image_url",
-      "description",
-      "protected",
-      "verified",
-      "url"
-    ]
+  {
+    topicId: 5574,
+    account: 'TradeonNova'
+  },
+  {
+    topicId: 6355,
+    account: 'MaestroBots'
+  },
+  {
+    topicId: 6317,
+    account: 'bonkbot_io'
+  },
+  {
+    topicId: 6314,
+    account: 'gmgnai'
+  },
+  {
+    topicId: 6320,
+    account: 'BloomTradingBot'
+  },
+  {
+    topicId: 381,
+    account: 'TrojanOnSolana'
+  },
+  {
+    topicId: 381,
+    account: 'TrojanTrading'
   }
-};
+];
 
-/**
- * Helper to get topic by ID
- */
-export function getTopicById(topicId: number): [string, TopicConfig] | undefined {
-  const entry = Object.entries(monitoringConfig.topics)
-    .find(([_, topic]) => topic.id === topicId);
-  return entry;
+export interface MonitoringConfig {
+  topics: Record<string, any>;
+  groupId: string;
+  polling: {
+    intervalMinutes: number;
+    maxResults: number;
+    timeWindowHours: number;
+    batchSize: number;
+    retry: RetryPolicy;
+  };
+  fields: {
+    tweet: string[];
+    expansions: string[];
+    media: string[];
+    user: string[];
+  };
 }
-
-export { getFilterStrategy, matchesTopic };

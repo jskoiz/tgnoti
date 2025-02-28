@@ -41,10 +41,22 @@ export interface SendStageMetadata {
 
 export interface StageMetadata {
   send?: SendStageMetadata;
+  skipped?: boolean;
+  message?: string;
+  reason?: string;
+  errorType?: string;
+  errorMessage?: string;
+  validationDurationMs?: number;
   validation?: {
     isValid: boolean;
+    status: 'pending' | 'success' | 'failed' | 'skipped' | 'error';
     reason?: string;
-    isMigration?: boolean;
+    details?: Record<string, unknown>;
+    storage?: {
+      storedInMongoDB: boolean;
+      storageError?: string;
+      storageDurationMs?: number;
+    };
   };
   fetch?: {
     fetchDurationMs?: number;
@@ -57,6 +69,18 @@ export interface StageMetadata {
   filter?: {
     matched: boolean;
     rules: string[];
+    filterDurationMs?: number;
+  };
+  format?: {
+    formatDurationMs?: number;
+    formattedMessage?: string;
+    mediaAttachments?: Array<{
+      type: 'photo' | 'video' | 'gif';
+      url: string;
+    }>;
+    messageButtons?: any[][];
+    messageLength?: number;
+    hasMedia?: boolean;
   };
 }
 
@@ -72,7 +96,6 @@ export interface TweetContext {
   formatted: boolean;
   sent: boolean;
   error?: Error;
-  isMigration?: boolean;
   metadata: StageMetadata;
 }
 
@@ -84,7 +107,6 @@ export interface PipelineConfig {
   enableFiltering: boolean;
   enableFormatting: boolean;
   retryCount: number;
-  isMigration?: boolean;
   timeoutMs: number;
 }
 

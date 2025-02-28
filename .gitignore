@@ -33,3 +33,7 @@ lastTweetId.json
 seenTweets.json
 config.json
 config.*.json
+memory-bank/
+memory-bank
+.clinerules*
+*.db

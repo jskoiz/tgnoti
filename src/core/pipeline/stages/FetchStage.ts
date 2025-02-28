@@ -1,10 +1,10 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../../../types/logger.js';
 import { TYPES } from '../../../types/di.js';
-import { SearchStrategy } from '../../../twitter/searchStrategy.js';
+import { SearchStrategy } from '../../twitter/searchStrategy.js';
 import { SearchConfig } from '../../../config/searchConfig.js';
 import { PipelineStage, StageResult, TweetContext } from '../types/PipelineTypes.js';
-import { MetricsManager } from '../../../utils/MetricsManager.js';
+import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { ErrorHandler } from '../../../utils/ErrorHandler.js';
 import { Tweet } from '../../../types/twitter.js';
 
@@ -78,7 +78,7 @@ export class FetchStage implements PipelineStage<TweetContext, TweetContext> {
         language: 'en'
       });
       
-      const enrichedTweet = tweets.find(t => t.id === context.tweet.id);
+      const enrichedTweet = tweets.find((t: Tweet) => t.id === context.tweet.id);
       
       if (!enrichedTweet) {
         return {

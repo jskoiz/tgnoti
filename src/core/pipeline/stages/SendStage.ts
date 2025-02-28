@@ -2,14 +2,15 @@ import { injectable, inject } from 'inversify';
 import { Logger } from '../../../types/logger.js';
 import { TYPES } from '../../../types/di.js';
 import { PipelineStage, StageResult, TweetContext, SendStageMetadata } from '../types/PipelineTypes.js';
-import { MetricsManager } from '../../../utils/MetricsManager.js';
+import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { ErrorHandler } from '../../../utils/ErrorHandler.js';
-import { TelegramMessageQueue } from '../../../telegram/TelegramMessageQueue.js';
+import { TelegramMessageQueue } from '../../../telegram/queue/TelegramMessageQueue.js';
+import { TelegramConfig } from '../../../config/telegram.js';
 import { TelegramQueueConfig } from '../../../types/telegram.js';
-import { Storage } from '../../../storage/storage.js';
+import { Storage } from '../../storage/storage.js';
 import { MonitoringType } from '../../../types/monitoring.js';
 import { QueuedMessage } from '../../../types/telegram.js';
-import { MonitoringDashboard } from '../../../utils/MonitoringDashboard.js';
+import { MonitoringDashboard } from '../../monitoring/MonitoringDashboard.js';
 
 @injectable()
 export class SendStage implements PipelineStage<TweetContext, TweetContext> {
@@ -22,7 +23,8 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
     @inject(TYPES.TelegramMessageQueue) private messageQueue: TelegramMessageQueue,
     @inject(TYPES.Storage) private storage: Storage,
     @inject(TYPES.TelegramQueueConfig) private queueConfig: TelegramQueueConfig,
-    @inject(TYPES.MonitoringDashboard) private dashboard: MonitoringDashboard
+    @inject(TYPES.MonitoringDashboard) private dashboard: MonitoringDashboard,
+    @inject(TYPES.TelegramConfig) private telegramConfig: TelegramConfig
   ) {}
 
   /**
@@ -36,7 +38,7 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
     });
 
     try {
-      if (!context.metadata.send?.formattedMessage) {
+      if (!context.metadata.format?.formattedMessage) {
         return {
           success: false,
           data: context,
@@ -47,8 +49,8 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
         };
       }
 
-      // Convert topicId to number and validate
-      const chatId = Number(context.topicId);
+      // Get group ID from config and validate topic ID
+      const chatId = Number(this.telegramConfig.api.groupId);
       if (isNaN(chatId)) {
         return {
           success: false,
@@ -64,7 +66,9 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
       // Prepare message for queue
       const queueMessage: Omit<QueuedMessage, 'id' | 'firstAttempt' | 'retryCount'> = {
         chatId,
-        content: context.metadata.send.formattedMessage,
+        tweetId: context.tweet.id,
+        threadId: Number(context.topicId),
+        content: context.metadata.format.formattedMessage,
         messageOptions: {
           parse_mode: 'HTML',
           reply_markup: context.metadata.send?.messageButtons ? {
@@ -88,9 +92,6 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
         };
       }
 
-      // Mark tweet as seen after successful queueing
-      await this.storage.markSeen(context.tweet.id, context.topicId);
-
       // Get queue status
       const queueStatus = this.messageQueue.getQueueStatus();
       const queueMetrics = this.messageQueue.getMetrics();
@@ -102,7 +103,7 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
         metadata: {
           ...context.metadata, 
           send: {
-            formattedMessage: context.metadata.send?.formattedMessage,
+            formattedMessage: context.metadata.format.formattedMessage,
             messageButtons: context.metadata.send?.messageButtons,
             sendDurationMs: Date.now() - startTime,
             queueMessageId: messageId,

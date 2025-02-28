@@ -1,6 +1,4 @@
-import { AppConfig, TwitterConfig, TelegramConfig, MonitoringConfig } from './index.js';
-import { validateRetryPolicy } from './retry.js';
-import { validateTopicConfig } from './topics.js';
+import { AppConfig, TwitterConfigV2, TelegramConfig, MonitoringConfig } from './index.js';
 
 /**
  * Validation result interface
@@ -11,9 +9,36 @@ export interface ValidationResult {
 }
 
 /**
+ * Validate retry policy configuration
+ */
+function validateRetryPolicy(policy: any): ValidationResult {
+  const errors: string[] = [];
+
+  if (!policy || typeof policy !== 'object') {
+    errors.push('Retry policy must be provided');
+    return { valid: false, errors };
+  }
+
+  if (typeof policy.maxAttempts !== 'number' || policy.maxAttempts <= 0) {
+    errors.push('maxAttempts must be a positive number');
+  }
+  if (typeof policy.baseDelay !== 'number' || policy.baseDelay <= 0) {
+    errors.push('baseDelay must be a positive number');
+  }
+  if (typeof policy.maxDelay !== 'number' || policy.maxDelay <= 0) {
+    errors.push('maxDelay must be a positive number');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+/**
  * Validate Twitter configuration
  */
-function validateTwitterConfig(config: TwitterConfig): ValidationResult {
+function validateTwitterConfig(config: TwitterConfigV2): ValidationResult {
   const errors: string[] = [];
   
   // Validate API config
@@ -38,14 +63,27 @@ function validateTwitterConfig(config: TwitterConfig): ValidationResult {
   if (!config.rateLimit || typeof config.rateLimit !== 'object') {
     errors.push('Twitter rate limit configuration must be provided');
   } else {
-    if (typeof config.rateLimit.defaultRate !== 'number' || config.rateLimit.defaultRate <= 0) {
-      errors.push('Twitter rate limit defaultRate must be a positive number');
+    if (typeof config.rateLimit.requestsPerSecond !== 'number' || config.rateLimit.requestsPerSecond <= 0) {
+      errors.push('Twitter rate limit requestsPerSecond must be a positive number');
     }
     if (typeof config.rateLimit.minRate !== 'number' || config.rateLimit.minRate <= 0) {
       errors.push('Twitter rate limit minRate must be a positive number');
     }
-    if (typeof config.rateLimit.queueCheckInterval !== 'number' || config.rateLimit.queueCheckInterval <= 0) {
-      errors.push('Twitter rate limit queueCheckInterval must be a positive number');
+    if (typeof config.rateLimit.safetyFactor !== 'number' || config.rateLimit.safetyFactor <= 0 || config.rateLimit.safetyFactor > 1) {
+      errors.push('Twitter rate limit safetyFactor must be between 0 and 1');
+    }
+    if (typeof config.rateLimit.topicDelay !== 'number' || config.rateLimit.topicDelay <= 0) {
+      errors.push('Twitter rate limit topicDelay must be a positive number');
+    }
+    if (!config.rateLimit.backoff || typeof config.rateLimit.backoff !== 'object') {
+      errors.push('Twitter rate limit backoff configuration must be provided');
+    } else {
+      validateBackoffConfig(config.rateLimit.backoff, errors);
+    }
+    if (!config.rateLimit.cooldown || typeof config.rateLimit.cooldown !== 'object') {
+      errors.push('Twitter rate limit cooldown configuration must be provided');
+    } else {
+      validateCooldownConfig(config.rateLimit.cooldown, errors);
     }
   }
 
@@ -87,6 +125,28 @@ function validateTwitterConfig(config: TwitterConfig): ValidationResult {
     errors
   };
 }
+
+function validateBackoffConfig(backoff: any, errors: string[]): void {
+  if (typeof backoff.initialDelay !== 'number' || backoff.initialDelay <= 0) {
+    errors.push('Twitter rate limit backoff initialDelay must be a positive number');
+  }
+  if (typeof backoff.maxDelay !== 'number' || backoff.maxDelay <= 0) {
+    errors.push('Twitter rate limit backoff maxDelay must be a positive number');
+  }
+  if (typeof backoff.multiplier !== 'number' || backoff.multiplier <= 1) {
+    errors.push('Twitter rate limit backoff multiplier must be greater than 1');
+  }
+}
+
+function validateCooldownConfig(cooldown: any, errors: string[]): void {
+  if (typeof cooldown.duration !== 'number' || cooldown.duration <= 0) {
+    errors.push('Twitter rate limit cooldown duration must be a positive number');
+  }
+  if (typeof cooldown.retryAfter !== 'number' || cooldown.retryAfter <= 0) {
+    errors.push('Twitter rate limit cooldown retryAfter must be a positive number');
+  }
+}
+
 
 /**
  * Validate Telegram configuration
@@ -232,18 +292,6 @@ export function validateConfig(config: AppConfig): ValidationResult {
   const monitoringValidation = validateMonitoringConfig(config.monitoring);
   if (!monitoringValidation.valid) {
     errors.push(...monitoringValidation.errors.map(e => `Monitoring config: ${e}`));
-  }
-
-  // Validate topics
-  if (!Array.isArray(config.topics)) {
-    errors.push('Topics must be an array');
-  } else {
-    config.topics.forEach((topic, index) => {
-      const topicValidation = validateTopicConfig(topic);
-      if (!topicValidation.valid) {
-        errors.push(`Topic ${index + 1} (${topic.name}): ${topicValidation.errors.join(', ')}`);
-      }
-    });
   }
 
   return {

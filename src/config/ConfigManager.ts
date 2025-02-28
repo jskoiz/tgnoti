@@ -30,6 +30,7 @@ export class ConfigManager {
 
   initialize(): void {
     this.logger.info('Initializing configuration manager');
+    this.logger.debug('Current environment variables:', { env: process.env });
     this.validateAll();
   }
 
@@ -43,22 +44,30 @@ export class ConfigManager {
       return this.configCache.get(key) as T;
     }
 
+    // Log the current state
+    this.logger.debug('Getting environment config', {
+      key,
+      currentValue: process.env[key],
+      hasValidation: !!this.validations.get(key)
+    });
     const value = process.env[key];
+
+    const validation = this.validations.get(key);
+    
     if (!value) {
-      const validation = this.validations.get(key);
-      if (validation) {
+      // Only throw error if the config is required (has validation)
+      if (validation && validation.required.length > 0) {
         this.logger.error(`Missing required environment variable: ${key}`);
         this.logger.error('Required:');
         validation.required.forEach(req => this.logger.error(`- ${req}`));
         this.logger.error(`Example: ${validation.example}`);
-      } else {
-        this.logger.error(`Missing environment variable: ${key}`);
+        throw new Error(`Missing required environment variable: ${key}`);
       }
-      throw new Error(`Missing environment variable: ${key}`);
+      // Return undefined for optional environment variables
+      return undefined as T;
     }
 
     // Validate if validation exists
-    const validation = this.validations.get(key);
     if (validation && !validation.validate(value)) {
       this.logger.error(`${validation.message}: ${key}`);
       this.logger.error('Required:');
@@ -73,6 +82,7 @@ export class ConfigManager {
   }
 
   validateAll(): void {
+    this.logger.info('Validating all environment variables');
     let hasError = false;
 
     for (const [key, validation] of this.validations.entries()) {
@@ -80,10 +90,23 @@ export class ConfigManager {
         const value = process.env[key];
         if (!value) {
           hasError = true;
+          this.logger.error(`Missing required variable: ${key}`, undefined, {
+            required: validation.required,
+            example: validation.example
+          });
           continue;
         }
         if (!validation.validate(value)) {
           hasError = true;
+          this.logger.error(`Invalid value for ${key}`, undefined, {
+            value,
+            required: validation.required,
+            example: validation.example
+          });
+        } else {
+          this.logger.debug(`Validated ${key}`, {
+            value
+          });
         }
       } catch (error) {
         hasError = true;

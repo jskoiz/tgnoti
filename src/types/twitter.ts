@@ -38,6 +38,7 @@ export interface Tweet {
   
   // Quote/Retweet
   quotedTweet?: Tweet;
+  replyToTweet?: Tweet;  // Added for reply context
   isRetweet?: boolean;
   
   // Entities
@@ -77,7 +78,7 @@ function getVerifiedType(user: RettiwtUser): 'none' | 'blue' | 'business' | 'gov
 // Mapping functions
 export function mapRettiwtUserToTweetUser(user: RettiwtUser): TweetUser {
   return {
-    userName: user.userName,
+    userName: user.userName.toLowerCase(), // Normalize username to lowercase
     displayName: user.fullName,
     fullName: user.fullName,
     description: user.description,
@@ -95,6 +96,15 @@ export function mapRettiwtTweetToTweet(rettiwtTweet: RettiwtTweet): Tweet {
   const quotedTweet = 'quotedTweet' in rettiwtTweet 
     ? (rettiwtTweet as { quotedTweet?: RettiwtTweet }).quotedTweet
     : (rettiwtTweet as { quoted_tweet?: RettiwtTweet }).quoted_tweet;
+    
+  // Handle reply context through referenced tweets
+  const replyToTweet = 'referencedTweets' in rettiwtTweet 
+    ? (rettiwtTweet as { referencedTweets?: { type: string; tweet: RettiwtTweet }[] }).referencedTweets?.find(
+        ref => ref.type === 'replied_to'
+      )?.tweet
+    : (rettiwtTweet as { referenced_tweets?: { type: string; tweet: RettiwtTweet }[] }).referenced_tweets?.find(
+        ref => ref.type === 'replied_to'
+      )?.tweet;
 
   const isRetweet = 'isRetweet' in rettiwtTweet
     ? (rettiwtTweet as { isRetweet?: boolean }).isRetweet
@@ -114,6 +124,7 @@ export function mapRettiwtTweetToTweet(rettiwtTweet: RettiwtTweet): Tweet {
       type: m.type as 'photo' | 'video' | 'gif'
     })),
     quotedTweet: quotedTweet ? mapRettiwtTweetToTweet(quotedTweet) : undefined,
+    replyToTweet: replyToTweet ? mapRettiwtTweetToTweet(replyToTweet) : undefined,
     isRetweet,
     entities: rettiwtTweet.entities ? {
       hashtags: rettiwtTweet.entities.hashtags || [],
@@ -134,12 +145,15 @@ export interface QueryGroup {
 export interface AdvancedFilter {
   hashtags?: string[];
   cashtags?: string[];
-  exact_phrases?: string[];
-  exclude_words?: string[];
+  includeWords?: string[];
+  includePhrase?: string;
+  excludeWords?: string[];
   from_verified?: boolean;
   has_links?: boolean;
   has_media?: boolean;
   include_replies?: boolean;
+  fromUsers?: string[];
+  mentions?: string[];
 }
 
 export interface SearchQueryConfig {

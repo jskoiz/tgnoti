@@ -1,13 +1,45 @@
 import { injectable, inject } from 'inversify';
-import { AppConfig } from './index.js';
-import { DEFAULT_RETRY_POLICY, RetryPolicy } from './retry.js';
-import { TwitterConfig } from './twitter.js';
+import { config } from 'dotenv';
+import { TwitterConfigV2, RateLimitConfig } from './twitter.js';
 import { TelegramConfig } from './telegram.js';
 import { MonitoringConfig } from './monitoring.js';
 import { validateConfig } from './validation.js';
 import { Logger } from '../types/logger.js';
 import { ConfigManager } from './ConfigManager.js';
 import { TYPES } from '../types/di.js';
+import { SearchConfig } from './searchConfig.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+/**
+ * Core application configuration interface
+ */
+export interface StorageConfig {
+  cleanupAgeDays: number;
+}
+
+export interface AppConfig { // Updated to use only TwitterConfigV2
+  twitter: TwitterConfigV2;
+  telegram: TelegramConfig;
+  monitoring: MonitoringConfig;
+  storage: StorageConfig;
+}
+
+
+export interface RetryPolicy {
+  maxAttempts: number;
+  baseDelay: number;
+  maxDelay: number;
+  jitter: boolean;
+}
+
+// Default retry policy
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  maxAttempts: 3,
+  baseDelay: 1000,
+  maxDelay: 10000,
+  jitter: true
+};
 
 /**
  * Environment variable names
@@ -15,13 +47,18 @@ import { TYPES } from '../types/di.js';
 const ENV = {
   // Twitter
   TWITTER_API_KEY: 'RETTIWT_API_KEY',
+  TWITTER_API_KEY_1: 'RETTIWT_API_KEY_1',
+  TWITTER_API_KEY_2: 'RETTIWT_API_KEY_2',
+  TWITTER_API_KEY_3: 'RETTIWT_API_KEY_3',
   TWITTER_BEARER_TOKEN: 'BEARER_TOKEN',
   TWITTER_TIMEOUT: 'TWITTER_TIMEOUT',
   TWITTER_RATE_LIMIT: 'TWITTER_RATE_LIMIT',
+  TWITTER_TOPIC_DELAY_MS: 'TWITTER_TOPIC_DELAY_MS',
   TWITTER_MIN_RATE: 'TWITTER_MIN_RATE',
   TWITTER_QUEUE_CHECK_INTERVAL: 'TWITTER_QUEUE_CHECK_INTERVAL',
   TWITTER_CACHE_TTL: 'TWITTER_CACHE_TTL',
   TWITTER_CACHE_MAX_ENTRIES: 'TWITTER_CACHE_MAX_ENTRIES',
+  TWEET_CLEANUP_AGE_DAYS: 'TWEET_CLEANUP_AGE_DAYS',
   
   // Telegram
   TELEGRAM_BOT_TOKEN: 'TELEGRAM_BOT_TOKEN',
@@ -41,7 +78,8 @@ const ENV = {
   RETRY_MAX_ATTEMPTS: 'RETRY_MAX_ATTEMPTS',
   RETRY_BASE_DELAY: 'RETRY_BASE_DELAY',
   RETRY_MAX_DELAY: 'RETRY_MAX_DELAY',
-  RETRY_JITTER: 'RETRY_JITTER'
+  RETRY_JITTER: 'RETRY_JITTER',
+  MONGO_DB_STRING: 'MONGO_DB_STRING'
 } as const;
 
 /**
@@ -59,6 +97,9 @@ const DEFAULTS = {
       userDetailsTTL: 5 * 60 * 1000,
       maxEntries: 1000
     }
+  },
+  storage: {
+    cleanupAgeDays: 7
   },
   telegram: {
     queueCheckInterval: 30000,
@@ -116,8 +157,17 @@ function getEnvBool(name: keyof typeof ENV, defaultValue: boolean): boolean {
 function getEnvNumber(name: keyof typeof ENV, defaultValue: number): number {
   const value = getEnvVar(name);
   if (value === undefined) return defaultValue;
-  const parsed = parseInt(value, 10);
+  const parsed = parseFloat(value);
   return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Helper function to get tweet cleanup age in days
+ */
+function getTweetCleanupAgeDays(): number {
+  const value = getEnvVar('TWEET_CLEANUP_AGE_DAYS');
+  if (value === undefined) return DEFAULTS.storage.cleanupAgeDays;
+  return parseInt(value, 10) || DEFAULTS.storage.cleanupAgeDays;
 }
 
 /**
@@ -129,8 +179,22 @@ export class Environment {
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.ConfigManager) private configManager: ConfigManager
-  ) {}
+    @inject(TYPES.ConfigManager) private configManager: ConfigManager,
+    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig
+  ) {
+    // Initialize environment variables
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const basePath = path.join(__dirname, '../..');
+    
+    // Load environment variables from .env file
+    const result = config({ path: path.join(basePath, '.env') });
+    
+    if (result.error) {
+      this.logger.error('Failed to load .env file');
+      throw new Error('Failed to load .env file');
+    }
+  }
 
   /**
    * Validate all required environment variables are set
@@ -140,7 +204,8 @@ export class Environment {
       'TWITTER_API_KEY',
       'TWITTER_BEARER_TOKEN',
       'TELEGRAM_BOT_TOKEN',
-      'TELEGRAM_CHAT_ID'
+      'TELEGRAM_CHAT_ID',
+      'MONGO_DB_STRING'
     ] as const;
 
     const missing = requiredVars.filter(name => !getEnvVar(name));
@@ -164,6 +229,12 @@ export class Environment {
 
     this.logger.debug('Loading configuration from environment');
 
+    // Validate MongoDB connection string
+    const mongoDbString = process.env.MONGO_DB_STRING;
+    if (!mongoDbString) {
+      throw new Error('MONGO_DB_STRING environment variable is required but not set');
+    }
+
     // First validate environment
     this.validateEnvironment();
 
@@ -173,6 +244,14 @@ export class Environment {
     const twitter = {
       api: {
         bearerToken: getEnvVar('TWITTER_BEARER_TOKEN', true)!,
+        keys: {
+          main: getEnvVar('TWITTER_API_KEY', true)!,
+          additional: [
+            getEnvVar('TWITTER_API_KEY_1'),
+            getEnvVar('TWITTER_API_KEY_2'),
+            getEnvVar('TWITTER_API_KEY_3')
+          ].filter(Boolean) as string[]
+        },
         timeout: getEnvNumber('TWITTER_TIMEOUT', DEFAULTS.twitter.timeout),
         headers: {
           'x-twitter-client-language': 'en',
@@ -181,10 +260,19 @@ export class Environment {
         }
       },
       rateLimit: {
-        defaultRate: getEnvNumber('TWITTER_RATE_LIMIT', DEFAULTS.twitter.rateLimit.defaultRate),
-        minRate: getEnvNumber('TWITTER_MIN_RATE', DEFAULTS.twitter.rateLimit.minRate),
-        queueCheckInterval: getEnvNumber('TWITTER_QUEUE_CHECK_INTERVAL', DEFAULTS.twitter.rateLimit.queueCheckInterval),
-        retryAfterMultiplier: 1.5
+        requestsPerSecond: Number(process.env.TWITTER_RATE_LIMIT) || 1,
+        minRate: Number(process.env.TWITTER_MIN_RATE) || 0.1,
+        safetyFactor: 0.75,
+        topicDelay: Number(process.env.TWITTER_TOPIC_DELAY_MS) || 30000,
+        backoff: {
+          initialDelay: 1000,
+          maxDelay: 60000,
+          multiplier: 3
+        },
+        cooldown: {
+          duration: 15 * 60 * 1000,
+          retryAfter: 15000
+        }
       },
       cache: {
         userDetailsTTL: getEnvNumber('TWITTER_CACHE_TTL', DEFAULTS.twitter.cache.userDetailsTTL),
@@ -219,9 +307,8 @@ export class Environment {
       },
       retry: retryPolicy,
       searchWindow: {
-        pastDays: 30,
-        futureDays: 7,
-        defaultWindow: 30
+        defaultWindowMinutes: this.searchConfig ? this.searchConfig.getSearchWindowMinutes() : 1,
+        overlapBufferMinutes: this.searchConfig ? this.searchConfig.getOverlapBufferMinutes() : 0.5
       }
     };
  
@@ -307,7 +394,9 @@ export class Environment {
       twitter,
       telegram: telegram as TelegramConfig, // Type assertion since we know the structure matches
       monitoring,
-      topics: [] // Topics should be loaded separately from a configuration file
+      storage: {
+        cleanupAgeDays: getTweetCleanupAgeDays()
+      }
     };
 
     // Validate the configuration

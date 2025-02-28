@@ -2,9 +2,9 @@ import { injectable, inject } from 'inversify';
 import { Logger } from '../../../types/logger.js';
 import { TYPES } from '../../../types/di.js';
 import { PipelineStage, StageResult, TweetContext } from '../types/PipelineTypes.js';
-import { MetricsManager } from '../../../utils/MetricsManager.js';
+import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { ErrorHandler } from '../../../utils/ErrorHandler.js';
-import { EnhancedMessageFormatter } from '../../../bot/messageFormatter.js';
+import { EnhancedMessageFormatter } from '../../../telegram/bot/messageFormatter.js';
 import { TweetMessageConfig } from '../../../types/telegram.js';
 
 @injectable()
@@ -33,7 +33,9 @@ export class FormatStage implements PipelineStage<TweetContext, TweetContext> {
       const messageConfig: TweetMessageConfig = {
         tweet: context.tweet,
         quotedTweet: context.tweet.quotedTweet,
-        showSummarizeButton: context.tweet.text.length > 280
+        replyToTweet: context.tweet.replyToTweet,
+        showSummarizeButton: context.tweet.text.length > 280,
+        mediaHandling: 'inline'
       };
 
       // Format the tweet message
@@ -63,12 +65,14 @@ export class FormatStage implements PipelineStage<TweetContext, TweetContext> {
         formatted: true,
         metadata: {
           ...context.metadata,
-          formatDurationMs: Date.now() - startTime,
-          formattedMessage,
-          mediaAttachments,
-          messageButtons,
-          messageLength: formattedMessage.length,
-          hasMedia: mediaAttachments.length > 0
+          format: {
+            formatDurationMs: Date.now() - startTime,
+            formattedMessage,
+            mediaAttachments,
+            messageButtons,
+            messageLength: formattedMessage.length,
+            hasMedia: mediaAttachments.length > 0
+          }
         }
       };
 
@@ -81,9 +85,11 @@ export class FormatStage implements PipelineStage<TweetContext, TweetContext> {
         success: true,
         data: updatedContext,
         metadata: {
-          formatDurationMs: Date.now() - startTime,
-          messageLength: formattedMessage.length,
-          mediaCount: mediaAttachments.length
+          format: {
+            formatDurationMs: Date.now() - startTime,
+            messageLength: formattedMessage.length,
+            mediaCount: mediaAttachments.length
+          }
         }
       };
 
@@ -97,9 +103,10 @@ export class FormatStage implements PipelineStage<TweetContext, TweetContext> {
         data: context,
         error: err,
         metadata: {
-          formatDurationMs: Date.now() - startTime,
-          errorType: err.name,
-          errorMessage: err.message
+          format: {
+            formatDurationMs: Date.now() - startTime
+          },
+          error: { type: err.name, message: err.message }
         }
       };
     }
@@ -117,6 +124,16 @@ export class FormatStage implements PipelineStage<TweetContext, TweetContext> {
 
     if (tweet.media?.length) {
       for (const media of tweet.media) {
+        attachments.push({
+          type: media.type,
+          url: media.url
+        });
+      }
+    }
+
+    // Handle reply tweet media if present
+    if (tweet.replyToTweet?.media?.length) {
+      for (const media of tweet.replyToTweet.media) {
         attachments.push({
           type: media.type,
           url: media.url

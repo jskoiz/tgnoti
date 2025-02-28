@@ -1,34 +1,26 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../../types/logger.js';
-import { MetricsManager } from '../../utils/MetricsManager.js';
+import { MetricsManager } from '../monitoring/MetricsManager.js';
 import { TYPES } from '../../types/di.js';
 import {
   PipelineStage,
   TweetContext,
   PipelineConfig,
   PipelineResult,
-  StageResult
+  StageResult,
+  StageMetadata
 } from './types/PipelineTypes.js';
 
 @injectable()
 export class TweetProcessingPipeline {
   private stages: PipelineStage<TweetContext, TweetContext>[] = [];
-  private config: PipelineConfig;
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    config?: Partial<PipelineConfig>
-  ) {
-    this.config = {
-      enableValidation: true,
-      enableFiltering: true,
-      enableFormatting: true,
-      retryCount: 3,
-      isMigration: false,
-      timeoutMs: 30000,
-      ...config
-    };
+    @inject(TYPES.PipelineConfig) private config: PipelineConfig
+  ) { 
+    this.logger.debug('Pipeline initialized with config:', config);
   }
 
   /**
@@ -53,11 +45,6 @@ export class TweetProcessingPipeline {
 
     let currentContext = { ...context };
     
-    // Update config if context is in migration mode
-    if (context.isMigration) {
-      this.config.isMigration = true;
-    }
-    
     let success = true;
     let error: Error | undefined;
 
@@ -68,8 +55,42 @@ export class TweetProcessingPipeline {
         try {
           const result = await this.executeStageWithRetry(stage, currentContext);
           stageResults[stage.name] = result;
+          
+          // Log stage completion
+          if (result.success) {
+            const metadata = result.metadata as StageMetadata | undefined;
+            const validationData = metadata?.validation || {
+              isValid: false,
+              status: 'pending' as const
+            };
+            
+            this.logger.debug(`Stage ${stage.name} completed`, {
+              tweetId: context.tweet.id,
+              success: true,
+              stageData: stage.name === 'validation' && metadata ? {
+                validation: {
+                  ...validationData,
+                  reason: metadata.reason,
+                  details: validationData.details
+                },
+                validationDurationMs: metadata.validationDurationMs,
+                reason: metadata.reason,
+                metrics: metadata.filter?.rules
+              } : undefined
+            });
+          } else {
+            this.logger.debug(`Stage ${stage.name} failed`, { 
+              tweetId: context.tweet.id, success: false, error: result.error?.message });
+          }
 
-          if (!result.success) {
+
+          // Handle skipped cases (e.g., already processed tweets)
+          if (result.success && result.metadata?.skipped) {
+            this.logger.info(`${stage.name}: ${result.metadata.message}`);
+            success = true;
+            break;
+          }
+          else if (!result.success) {
             success = false;
             error = result.error;
             break;
@@ -78,11 +99,7 @@ export class TweetProcessingPipeline {
           currentContext = result.data;
         } catch (e) {
           const err = e instanceof Error ? e : new Error(String(e));
-          this.logger.error(`Error in pipeline stage ${stage.name}`, {
-            error: err,
-            tweetId: context.tweet.id,
-            topicId: context.topicId
-          });
+          this.logger.error(`Error in pipeline stage ${stage.name} (tweet: ${context.tweet.id}, topic: ${context.topicId})`, err);
           success = false;
           error = err;
           break;
@@ -93,11 +110,7 @@ export class TweetProcessingPipeline {
       }
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      this.logger.error('Pipeline execution failed', {
-        error: err,
-        tweetId: context.tweet.id,
-        topicId: context.topicId
-      });
+      this.logger.error(`Pipeline execution failed (tweet: ${context.tweet.id}, topic: ${context.topicId})`, err);
       success = false;
       error = err;
     }
@@ -116,8 +129,16 @@ export class TweetProcessingPipeline {
     this.logger.debug('Pipeline execution completed', {
       tweetId: context.tweet.id,
       topicId: context.topicId,
-      success,
-      processingTimeMs
+      status: { 
+        success, 
+        processingTimeMs 
+      },
+      stages: Object.fromEntries(
+        Object.entries(stageResults).map(([name, result]) => [
+          name,
+          { success: result.success, ...(result.metadata || {}) }
+        ])
+      )
     });
 
     return result;
@@ -151,14 +172,16 @@ export class TweetProcessingPipeline {
         }
 
         lastError = result.error;
-        this.logger.warn(`Stage ${stage.name} failed attempt ${attempt}/${this.config.retryCount}`, {
-          error: lastError
-        });
+        this.logger.warn(
+          `Stage ${stage.name} failed attempt ${attempt}/${this.config.retryCount}`,
+          lastError
+        );
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
-        this.logger.warn(`Stage ${stage.name} failed attempt ${attempt}/${this.config.retryCount}`, {
-          error: lastError
-        });
+        this.logger.warn(
+          `Stage ${stage.name} failed attempt ${attempt}/${this.config.retryCount}`,
+          lastError
+        );
       }
 
       if (attempt < this.config.retryCount) {

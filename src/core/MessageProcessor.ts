@@ -1,9 +1,10 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../types/logger.js';
-import { FilterPipeline } from './FilterPipeline.js';
+import { TweetProcessingPipeline } from './pipeline/TweetProcessingPipeline.js';
 import { RateLimitedQueue } from './RateLimitedQueue.js';
+import { TweetContext } from './pipeline/types/PipelineTypes.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
-import { MetricsManager } from '../utils/MetricsManager.js';
+import { MetricsManager } from './monitoring/MetricsManager.js';
 import { TYPES } from '../types/di.js';
 
 @injectable()
@@ -11,8 +12,8 @@ export class MessageProcessor {
   constructor(
     @inject(TYPES.Logger)
     private logger: Logger,
-    @inject(TYPES.FilterPipeline)
-    private filterPipeline: FilterPipeline,
+    @inject(TYPES.TweetProcessingPipeline)
+    private pipeline: TweetProcessingPipeline,
     @inject(TYPES.RateLimitedQueue)
     private queue: RateLimitedQueue,
     @inject(TYPES.ErrorHandler)
@@ -21,15 +22,18 @@ export class MessageProcessor {
     private metrics: MetricsManager
   ) {}
 
-  async processMessage(message: any): Promise<void> {
+  async processMessage(message: TweetContext): Promise<void> {
     try {
       this.metrics.increment('messages.received');
       
-      // Apply filters
-      const shouldProcess = await this.filterPipeline.apply(message);
-      if (!shouldProcess) {
-        this.metrics.increment('messages.filtered');
-        this.logger.debug('Message filtered out by pipeline');
+      // Process through pipeline
+      const result = await this.pipeline.process(message);
+      
+      if (!result.success) {
+        this.metrics.increment('messages.failed');
+        this.logger.debug('Message processing failed', {
+          error: result.error
+        });
         return;
       }
 
@@ -53,7 +57,6 @@ export class MessageProcessor {
 
   async initialize(): Promise<void> {
     this.logger.info('Initializing message processor');
-    await this.filterPipeline.initialize();
     await this.queue.initialize();
   }
 
