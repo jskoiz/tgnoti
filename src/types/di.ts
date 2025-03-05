@@ -13,7 +13,6 @@ const TYPES = {
   CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
   UsernameHandler: Symbol.for('UsernameHandler'),
   MetricsManager: Symbol.for('MetricsManager'),
-  EventBus: Symbol.for('EventBus'),
   MonitoringDashboard: Symbol.for('MonitoringDashboard'),
 
   // Twitter services
@@ -39,6 +38,8 @@ const TYPES = {
   FilterStage: Symbol.for('FilterStage'),
   ValidationStage: Symbol.for('ValidationStage'),
   FormatStage: Symbol.for('FormatStage'),
+  AgeValidationStage: Symbol.for('AgeValidationStage'),
+  DuplicateCheckStage: Symbol.for('DuplicateCheckStage'),
   SendStage: Symbol.for('SendStage'),
 
   // Queue management
@@ -58,13 +59,8 @@ const TYPES = {
   TweetFormatter: Symbol.for('TweetFormatter'),
   MessageValidator: Symbol.for('MessageValidator'),
   TwitterNotifier: Symbol.for('TwitterNotifier'),
+  TweetProcessor: Symbol.for('TweetProcessor'),
   TweetMonitor: Symbol.for('TweetMonitor'),
-  
-  // Event system
-  EventProcessor: Symbol.for('EventProcessor'),
-  EligibilityHandler: Symbol.for('EligibilityHandler'),
-  FormatterHandler: Symbol.for('FormatterHandler'),
-  SenderHandler: Symbol.for('SenderHandler')
 };
 
 export { TYPES };

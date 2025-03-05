@@ -18,6 +18,7 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     @inject('TelegramBotApi') private bot: TelegramBot
   ) {
     this.logger.setComponent('TelegramMessageSender');
+    this.logger.info('TelegramMessageSender initialized');
   }
 
   async sendMessage(
@@ -26,6 +27,7 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     options?: TelegramBot.SendMessageOptions,
     metadata?: TweetMetadata
   ): Promise<SendMessageResult> {
+    this.logger.debug(`Attempting to send message to chat ${chatId} with thread ID ${options?.message_thread_id || 'none'}`);
     // Check if we're currently rate limited
     const now = Date.now();
     if (this.rateLimitRetryAfter > 0 && now < this.lastRateLimitTime + this.rateLimitRetryAfter) {
@@ -41,50 +43,34 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     }
 
     try {
-      this.logger.logObject('debug', 'Attempting to send Telegram message', {
-        chatId,
-        messageLength: text.length,
-        hasOptions: !!options,
-        threadId: options?.message_thread_id
-      });
-      
       // Ensure message_thread_id is properly set for forum messages
-      if (options?.message_thread_id) {
-        const logData = {
-          topicId: Number(options.message_thread_id),
-          topicName: this.getTopicName(Number(options.message_thread_id))
-        };
-
-        if (metadata?.tweet) {
-          Object.assign(logData, {
-            author: `@${metadata.tweet.tweetBy?.userName}`,
+      if (options?.message_thread_id && metadata?.tweet) {
+        const [topicName] = getTopicById(Number(options.message_thread_id)) || [];
+        const channelName = topicName || 'UNKNOWN_MONITORING';
+        const ageInMinutes = this.calculateTweetAge(metadata.tweet.createdAt);
+        
+        // Add additional logging for redirected tweets
+        if (metadata.redirectReason) {
+          this.logger.debug(`Sending ${metadata.redirectReason === 'competitor_tweet' ? 'FROM' : 'MENTION'} competitor tweet to consolidated channel`, {
+            channelName,
+            topicId: options.message_thread_id,
             tweetId: metadata.tweet.id,
-            matchReason: this.getMatchReason(metadata),
-            tweetText: metadata.tweet.text?.substring(0, 50) + (metadata.tweet.text?.length || 0 > 50 ? '...' : ''),
-            url: `https://x.com/${metadata.tweet.tweetBy?.userName}/status/${metadata.tweet.id}`
+            username: metadata.tweet.tweetBy?.userName,
+            redirectReason: metadata.redirectReason,
+            mentionedCompetitors: metadata.mentionedCompetitors
           });
+        } else {
+          this.logger.info(`${channelName} (${options.message_thread_id}): @${metadata.tweet.tweetBy?.userName} - ${metadata.tweet.id} [${ageInMinutes}]`);
         }
 
-        this.logger.logStructured({
-          timestamp: new Date().toISOString(),
-          level: LogLevel.INFO,
-          component: this.constructor.name,
-          message: metadata?.tweet
-            ? `${this.getTopicName(Number(options.message_thread_id))} (${options.message_thread_id}): @${metadata.tweet.tweetBy?.userName} - ${metadata.tweet.id} [${this.calculateTweetAge(metadata.tweet.createdAt)}]`
-            : `${this.getTopicName(Number(options.message_thread_id))} (${options.message_thread_id}): No tweet data`,
-          data: logData,
-          correlationId: undefined
-        });
       }
       
       const message = await this.bot.sendMessage(chatId.toString(), text, options);
-
-      this.logger.logObject('debug', 'Message sent successfully', { messageId: message.message_id });
+      this.logger.debug(`Message successfully sent to chat ${chatId}, message ID: ${message.message_id}`);
       
       // Reset rate limit state on successful send
       if (this.rateLimitRetryAfter > 0) {
         this.rateLimitRetryAfter = 0;
-        this.logger.debug('Rate limit state reset after successful message');
       }
       
       return {
@@ -94,10 +80,6 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     } catch (error) {
       const telegramError = this.handleError(error);
       this.logger.error('Failed to send Telegram message:', telegramError);
-      this.logger.logObject('error', 'Error details', {
-        name: error instanceof Error ? error.name : 'UnknownError',
-        message: error instanceof Error ? error.message : String(error)
-      });
       
       // Update rate limit state if this is a rate limit error
       const retryAfter = this.getRetryAfter(telegramError);
@@ -136,41 +118,20 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     }
 
     try {
-      this.logger.logObject('debug', 'Attempting to send Telegram photo', {
-        chatId,
-        hasOptions: !!options,
-        threadId: options?.message_thread_id
-      });
-      
       // Ensure message_thread_id is properly set for forum messages
-      if (options?.message_thread_id) {
-        const logData = {
-          topicId: Number(options.message_thread_id),
-          topicName: this.getTopicName(Number(options.message_thread_id)),
-        };
+      if (options?.message_thread_id && metadata?.tweet) {
+        const [topicName] = getTopicById(Number(options.message_thread_id)) || [];
+        const channelName = topicName || 'UNKNOWN_MONITORING';
+        const ageInMinutes = this.calculateTweetAge(metadata.tweet.createdAt);
 
-        if (metadata?.tweet) {
-          Object.assign(logData, {
-            author: `@${metadata.tweet.tweetBy?.userName}`,
-            tweetId: metadata.tweet.id,
-            matchReason: this.getMatchReason(metadata),
-            tweetText: metadata.tweet.text?.substring(0, 50) + (metadata.tweet.text?.length || 0 > 50 ? '...' : ''),
-            url: `https://x.com/${metadata.tweet.tweetBy?.userName}/status/${metadata.tweet.id}`
-          });
-        }
-
-        this.logger.logObject('info', '📨 Tweet Routing (with media)', logData);
+        this.logger.info(`${channelName} (${options.message_thread_id}): @${metadata.tweet.tweetBy?.userName} - ${metadata.tweet.id} [${ageInMinutes}]`);
       }
-      this.logger.debug(`Sending message to topic ${options?.message_thread_id}`);
       
       const message = await this.bot.sendPhoto(chatId.toString(), photo, options);
-
-      this.logger.logObject('debug', 'Photo sent successfully', { messageId: message.message_id });
       
       // Reset rate limit state on successful send
       if (this.rateLimitRetryAfter > 0) {
         this.rateLimitRetryAfter = 0;
-        this.logger.debug('Rate limit state reset after successful photo send');
       }
       
       return {
@@ -180,10 +141,6 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     } catch (error) {
       const telegramError = this.handleError(error);
       this.logger.error('Failed to send Telegram photo', telegramError);
-      this.logger.logObject('error', 'Error details', {
-        name: error instanceof Error ? error.name : 'UnknownError',
-        message: error instanceof Error ? error.message : String(error)
-      });
       
       // Update rate limit state if this is a rate limit error
       const retryAfter = this.getRetryAfter(telegramError);
@@ -282,34 +239,5 @@ export class TelegramMessageSender implements ITelegramMessageSender {
     } else {
       return `${Math.floor(minutes / 1440)}d ago`;
     }
-  }
-
-  /**
-   * Get the human-readable topic name from a topic ID
-   */
-  private getTopicName(topicId: number): string {
-    const topic = getTopicById(topicId);
-    const topicName = topic?.[0];
-    return topicName || 'Unknown Topic';
-  }
-
-  /**
-   * Determine why a tweet was matched to a topic
-   */
-  private getMatchReason(metadata: TweetMetadata): string {
-    if (!metadata.tweet?.tweetBy?.userName) {
-      return 'Unknown match reason';
-    }
-
-    // Check for username match
-    if (metadata.tweet.tweetBy.userName.toLowerCase() === metadata.matchedTopic?.toLowerCase()) {
-      return `Username match: @${metadata.tweet.tweetBy.userName}`;
-    }
-
-    // Check for content match
-    if (metadata.tweet.text?.toLowerCase().includes(metadata.matchedTopic?.toLowerCase() || '')) {
-      return `Content match: "${metadata.matchedTopic}"`;
-    }
-    return 'Unknown match reason';
   }
 }

@@ -108,7 +108,10 @@ export type SendMessageResult = {
 export interface TweetMetadata {
   tweet: Tweet;
   matchedTopic?: string;
+  redirectReason?: 'competitor_tweet' | 'competitor_mention';
+  mentionedCompetitors?: string[];
   type: 'original' | 'reply' | 'quote';
+  reason?: string; // Reason for validation/filtering failure
 }
 
 export interface ITelegramMessageSender {

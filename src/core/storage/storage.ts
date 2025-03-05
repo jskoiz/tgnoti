@@ -83,7 +83,7 @@ export class Storage {
       };
 
       // Log detailed topic configuration
-      this.logger.info('📋 Topic Configuration:', {
+      this.logger.debug('📋 Topic Configuration:', {
         topics: Object.entries(config.telegram.topicIds || {}).map(([name, id]) => ({
           name,
           id
@@ -143,6 +143,13 @@ export class Storage {
 
   async hasSeen(tweetId: string, topicId?: string): Promise<boolean> {
     const mongoTweet = await this.mongoDb.getTweet(tweetId);
+    const result = mongoTweet !== null || await this.tweetTracking.hasSeen(tweetId, topicId || '');
+    this.logger.debug(`Duplicate check for tweet ${tweetId}`, {
+      topicId,
+      result,
+      mongoFound: mongoTweet !== null,
+      sqliteFound: mongoTweet === null ? await this.tweetTracking.hasSeen(tweetId, topicId || '') : null
+    });
     return mongoTweet !== null || await this.tweetTracking.hasSeen(tweetId, topicId || '');
   }
 

@@ -3,6 +3,7 @@ import { TYPES } from '../types/di.js';
 import { Logger, LogContext, LogAggregator, LogLevel } from '../types/logger.js';
 import { MetricsManager } from '../types/metrics.js';
 import { LoggingConfig } from '../config/loggingConfig.js';
+import { Environment } from '../config/environment.js';
 
 type QueueTask<T> = () => Promise<T>;
 
@@ -35,7 +36,8 @@ export class RateLimitedQueue {
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig
+    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig,
+    @inject(TYPES.Environment) private environment: Environment
   ) {
     this.queue = [];
     this.processing = false;
@@ -60,7 +62,7 @@ export class RateLimitedQueue {
       rateLimit: this.requestsPerSecond
     };
     this.logger.debug('Initialize called', { ...context, alreadyInitialized: this.initialized });
-    this.logger.info('Initializing rate-limited queue', context);
+    this.logger.debug('Initializing rate-limited queue', context);
     this.startProcessing(); // Launch processing in the background
     this.startHeartbeat(); // Start heartbeat monitoring
     this.initialized = true;
@@ -70,7 +72,6 @@ export class RateLimitedQueue {
   async add<T>(task: QueueTask<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const wrappedTask = async () => {
-
         try {
           const result = await task();
           resolve(result);
@@ -89,24 +90,25 @@ export class RateLimitedQueue {
 
   setRateLimit(requestsPerSecond: number): void {
     this.requestsPerSecond = requestsPerSecond;
+    const config = this.environment.getConfig().twitter.rateLimit;
+
     const context: LogContext = {
       component: 'RateLimitedQueue',
       newLimit: requestsPerSecond,
       queueSize: this.queue.length
     };
     
-    // Apply a more conservative safety factor
-    const safetyFactor = 0.9; // 90% of the requested rate limit
-    const minRate = Number(process.env.TWITTER_MIN_RATE) || 0.2; // Increased minimum rate
-    const adjustedRate = Math.max(minRate, requestsPerSecond * safetyFactor);
+    // Apply safety factor from config
+    const safetyFactor = config.safetyFactor;
+    const adjustedRate = requestsPerSecond * safetyFactor;
     
     if (adjustedRate !== requestsPerSecond) {
       this.requestsPerSecond = adjustedRate;
       context.adjustedLimit = adjustedRate;
       context.safetyFactor = safetyFactor;
-      this.logger.info('Rate limit updated with safety factor', context);
+      this.logger.debug('Rate limit updated with safety factor', context);
     } else {
-      this.logger.info('Rate limit updated', context);
+      this.logger.debug('Rate limit updated', context);
     }
   }
 
@@ -126,14 +128,26 @@ export class RateLimitedQueue {
 
           const now = Date.now();
           const timeSinceLastProcess = now - this.lastProcessTime;
-          const minInterval = 1000 / this.requestsPerSecond;
-
-          if (timeSinceLastProcess < minInterval) {
-            // Add jitter to the delay to avoid synchronized requests
-            const jitter = Math.random() * 500; // 0-500ms of jitter
+          const requestInterval = Math.ceil(1000 / this.requestsPerSecond);
+          
+          this.logger.debug('Rate limit calculation', {
+            requestsPerSecond: this.requestsPerSecond,
+            requestInterval,
+            timeSinceLastProcess,
+            willDelay: timeSinceLastProcess < requestInterval,
+            delayTime: requestInterval - timeSinceLastProcess,
+            queueSize: this.queue.length
+          });
+          
+          // Simple delay between requests
+          if (timeSinceLastProcess < requestInterval) {
+            const jitter = Math.random() * 100; // 0-100ms of jitter
+            const waitTime = requestInterval - timeSinceLastProcess + jitter;
+            this.logger.debug(`Waiting for rate limit: ${waitTime}ms`);
             await new Promise(resolve => 
-              setTimeout(resolve, minInterval - timeSinceLastProcess + jitter)
+              setTimeout(resolve, waitTime)
             );
+            this.logger.debug('Rate limit delay completed');
           }
 
           const taskPromise = task();
@@ -257,35 +271,6 @@ export class RateLimitedQueue {
         context
       );
       
-      // More gradual rate reduction
-      const minRate = Number(process.env.TWITTER_MIN_RATE) || 0.2;
-      const newRate = Math.max(minRate, this.requestsPerSecond * 0.8); // 20% reduction instead of 50%
-      if (newRate < this.requestsPerSecond) {  
-        const errorObj = new Error(`Reducing rate limit due to rate limit errors: ${this.requestsPerSecond} -> ${newRate}`);
-          const context = {
-            component: 'RateLimitedQueue',
-          oldRate: this.requestsPerSecond,
-          newRate
-        };
-          this.logger.warn(`Reducing rate limit due to rate limit errors: ${this.requestsPerSecond} -> ${newRate}`, errorObj, context);
-        this.requestsPerSecond = newRate;
-      }
-
-      // Schedule rate recovery
-      const recoveryDelay = 5 * 60 * 1000; // 5 minutes
-      setTimeout(() => {
-        const recoveryRate = Math.min(1, this.requestsPerSecond * 1.2); // 20% increase up to max 1 req/sec
-        if (recoveryRate > this.requestsPerSecond) {
-          const context = {
-            component: 'RateLimitedQueue',
-            oldRate: this.requestsPerSecond,
-            recoveryRate
-          };
-          this.logger.info(`Recovering rate limit: ${this.requestsPerSecond} -> ${recoveryRate}`, context);
-          this.requestsPerSecond = recoveryRate;
-        }
-      }, recoveryDelay);
-      
       this.logger.updateAggregator(this.rateLimitAggregator);
     }
   }
@@ -304,6 +289,6 @@ export class RateLimitedQueue {
       component: 'RateLimitedQueue',
       remainingTasks: this.queue.length
     };
-    this.logger.info('Stopping rate-limited queue', context);
+    this.logger.debug('Stopping rate-limited queue', context);
   }
 }

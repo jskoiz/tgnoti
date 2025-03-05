@@ -5,6 +5,7 @@ import { TelegramQueueMetrics } from '../../types/telegram.js';
 import { CircuitBreakerConfig } from '../../types/monitoring.js';
 import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
+import { ColorFormatter } from '../../utils/colors.js';
 
 interface PipelineMetrics {
   stageMetrics: {
@@ -101,6 +102,8 @@ export class MonitoringDashboard {
   };
 
   private updateInterval!: NodeJS.Timeout;
+  private dashboardInterval!: NodeJS.Timeout;
+  private formatter = new ColorFormatter();
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -108,6 +111,7 @@ export class MonitoringDashboard {
   ) {
     this.initializeMetrics();
     this.startMetricsCollection();
+    this.startDashboardDisplay();
   }
 
   private initializeMetrics(): void {
@@ -156,6 +160,71 @@ export class MonitoringDashboard {
     this.updateInterval = setInterval(() => {
       this.collectMetrics();
     }, 5000); // Update every 5 seconds
+  }
+
+  /**
+   * Start the dashboard display
+   */
+  private startDashboardDisplay(): void {
+    // Check if we're in a terminal environment
+    if (process.stdout.isTTY) {
+      this.dashboardInterval = setInterval(() => {
+        this.displayDashboard();
+      }, 10000); // Update every 10 seconds
+    }
+  }
+
+  /**
+   * Display a real-time dashboard in the console
+   */
+  private displayDashboard(): void {
+    // Only display if explicitly requested via environment variable
+    if (process.env.SHOW_DASHBOARD !== 'true') {
+      return;
+    }
+
+    console.clear();
+    const now = new Date();
+    
+    console.log(this.formatter.bold('=== TWITTER MONITOR DASHBOARD ==='));
+    console.log(`${this.formatter.dim(`Last updated: ${now.toLocaleTimeString()}`)}\n`);
+    
+    // Overall metrics
+    console.log(this.formatter.bold('📊 OVERALL METRICS'));
+    console.log(`Tweets Processed: ${this.formatter.cyan(String(this.pipelineMetrics.overallMetrics.totalProcessed))}`);
+    console.log(`Success Rate: ${this.formatter.green(this.pipelineMetrics.overallMetrics.successRate.toFixed(1) + '%')}`);
+    console.log(`Avg Processing Time: ${this.formatter.yellow(this.pipelineMetrics.overallMetrics.averageProcessingTime.toFixed(0) + 'ms')}`);
+    console.log(`Active Topics: ${this.formatter.cyan(String(this.pipelineMetrics.overallMetrics.activeTopics))}\n`);
+    
+    // Pipeline stage metrics
+    console.log(this.formatter.bold('🔄 PIPELINE STAGES'));
+    Object.entries(this.pipelineMetrics.stageMetrics).forEach(([stage, metrics]) => {
+      const total = metrics.successCount + metrics.failureCount;
+      const successRate = total > 0 ? (metrics.successCount / total) * 100 : 0;
+      const successRateFormatted = successRate >= 90 
+        ? this.formatter.green(`${successRate.toFixed(1)}%`) 
+        : successRate >= 50 
+          ? this.formatter.yellow(`${successRate.toFixed(1)}%`) 
+          : this.formatter.red(`${successRate.toFixed(1)}%`);
+      
+      console.log(`${this.formatter.cyan(stage.padEnd(15))}: ${metrics.successCount}/${total} (${successRateFormatted}) - ${metrics.averageProcessingTime.toFixed(0)}ms avg`);
+    });
+    console.log();
+    
+    // System metrics
+    console.log(this.formatter.bold('🖥️ SYSTEM STATUS'));
+    const memoryUsedMB = Math.round(this.systemMetrics.memory.heapUsed / 1024 / 1024);
+    const memoryTotalMB = Math.round(this.systemMetrics.memory.heapTotal / 1024 / 1024);
+    console.log(`Memory: ${this.formatter.yellow(`${memoryUsedMB}MB / ${memoryTotalMB}MB`)} (${(memoryUsedMB / memoryTotalMB * 100).toFixed(1)}%)`);
+    
+    const circuitStatus = this.systemMetrics.circuitBreaker.status === 'CLOSED' 
+      ? this.formatter.green('CLOSED') 
+      : this.systemMetrics.circuitBreaker.status === 'HALF_OPEN' 
+        ? this.formatter.yellow('HALF_OPEN') 
+        : this.formatter.red('OPEN');
+    
+    console.log(`Circuit Breaker: ${circuitStatus}`);
+    console.log(`Rate Limit: ${this.formatter.yellow(String(this.systemMetrics.rateLimiting.remainingRequests))} requests remaining\n`);
   }
 
   private async collectMetrics(): Promise<void> {
@@ -301,6 +370,9 @@ export class MonitoringDashboard {
   public cleanup(): void {
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
+    }
+    if (this.dashboardInterval) {
+      clearInterval(this.dashboardInterval);
     }
   }
 }

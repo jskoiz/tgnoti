@@ -33,6 +33,8 @@ export class TelegramBot {
     @inject(TYPES.TelegramMessageSender) private messageSender: ITelegramMessageSender,
     @inject(TYPES.TopicFilterManager) private topicFilterManager: TopicFilterManager
   ) {
+    this.logger.setComponent('TelegramBot');
+    this.logger.info('TelegramBot constructor called');
     const envConfig = this.environment.getConfig();
     
     if (!envConfig.telegram) {
@@ -50,6 +52,11 @@ export class TelegramBot {
 
   async sendTweet(tweet: Tweet, topicId?: string): Promise<void> {
     try {
+      this.logger.info(`Attempting to send tweet ${tweet.id} to topic ${topicId || 'default'}`);
+      if (!this.isInitialized) {
+        this.logger.error('TelegramBot not initialized! Attempting to initialize now...');
+        await this.initialize();
+      }
       const config: TweetMessageConfig = {
         tweet,
         quotedTweet: tweet.quotedTweet,
@@ -114,6 +121,7 @@ export class TelegramBot {
   }
 
   async initialize(): Promise<void> {
+    this.logger.info('TelegramBot initialize method called');
     const hasLock = await this.acquireLock();
     try {
       await this.circuitBreaker.execute(async () => {
@@ -153,6 +161,7 @@ export class TelegramBot {
       this.telegramBot.startPolling();
       this.setupCommands();
       this.isInitialized = true;
+      this.logger.info('TelegramBot successfully initialized');
     } catch (error) {
       if (error instanceof Error && error.message === 'Circuit breaker is open') {
         this.logger.error('Telegram API is currently unavailable');

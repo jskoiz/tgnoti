@@ -32,11 +32,20 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
     @inject(TYPES.TelegramMessageSender) private sender: ITelegramMessageSender,
     @inject(TYPES.Storage) private storage: Storage
   ) {
+    this.logger.setComponent('TelegramMessageQueue');
+    this.logger.info('TelegramMessageQueue initialized with config', {
+      baseDelayMs: this.config.baseDelayMs,
+      maxRetries: this.config.maxRetries
+    });
     this.currentDelay = this.config.baseDelayMs;
     this.startProcessing();
   }
 
   public async queueMessage(message: Omit<QueuedMessage, 'id' | 'firstAttempt' | 'retryCount'>): Promise<string> {
+    this.logger.info(`Queueing message for chat ${message.chatId}, thread ${message.threadId}`, {
+      tweetId: message.tweetId,
+      priority: message.priority
+    });
     const id = this.generateMessageId();
     const queuedMessage: QueuedMessage = {
       ...message,
@@ -115,8 +124,14 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
       clearInterval(this.processInterval);
     }
 
+    this.logger.info('Starting message queue processing');
     this.processInterval = setInterval(() => {
       if (!this.isPaused && !this.isProcessing && this.queue.length > 0) {
+        this.logger.debug('Processing next message from queue', {
+          queueLength: this.queue.length,
+          isPaused: this.isPaused,
+          isProcessing: this.isProcessing
+        });
         this.processNextMessage();
       }
     }, 100); // Use a short interval for checking, but actual sending will respect currentDelay
@@ -130,26 +145,29 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
 
   private async processNextMessage(): Promise<void> {
     if (this.queue.length === 0 || this.isPaused) {
+      this.logger.debug('Skipping message processing', {
+        queueEmpty: this.queue.length === 0,
+        isPaused: this.isPaused
+      });
       return;
     }
 
     this.isProcessing = true;
     
     // Apply the current delay before processing
+    this.logger.debug(`Waiting ${this.currentDelay}ms before processing next message`);
     await new Promise(resolve => setTimeout(resolve, this.currentDelay));
     
     // If queue is empty after waiting, exit
     if (this.queue.length === 0) {
+      this.logger.debug('Queue empty after delay, exiting processing');
       this.isProcessing = false;
       return;
     }
     const message = this.queue[0];
 
     try {
-      this.logger.logObject('debug', `Processing message: ${message.id}`, {
-        tweetMetadata: message.tweetMetadata,
-        tweetId: message.tweetId,
-        threadId: message.threadId
+      this.logger.info(`Processing message: ${message.id}`, {
       });
 
       const result = await this.sender.sendMessage(
@@ -167,6 +185,8 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
         this.queue.shift();
         // Only mark as seen if both tweetId and threadId are present
         if (message.tweetId && message.threadId) {
+          this.logger.info(`Message successfully sent to chat thread ID ${message.threadId}`, {
+          });
           await this.storage.markSeen(message.tweetId, message.threadId.toString());
         }
         this.logger.debug(`Message ${message.id} sent successfully`);

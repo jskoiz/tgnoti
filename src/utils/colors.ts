@@ -100,6 +100,14 @@ export class ColorFormatter {
     return this.wrap(Colors.white, text);
   }
 
+  bold(text: string): string {
+    return this.wrap(Colors.bold, text);
+  }
+  
+  bgRed(text: string): string {
+    return this.wrap(Colors.bgRed, text);
+  }
+
   /**
    * Format log components with consistent colors
    */

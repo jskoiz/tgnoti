@@ -33,6 +33,7 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
   async execute(context: TweetContext): Promise<StageResult<TweetContext>> {
     const startTime = Date.now();
     this.logger.debug('Starting send stage', {
+      redirectReason: context.metadata.redirectReason,
       topicId: context.topicId,
       tweetId: context.tweet.id
     });
@@ -75,11 +76,29 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
             inline_keyboard: context.metadata.send.messageButtons
           } : undefined
         },
+        tweetMetadata: {
+          tweet: context.tweet,
+          matchedTopic: context.topicId,
+          redirectReason: context.metadata.redirectReason,
+          mentionedCompetitors: context.metadata.mentionedCompetitors,
+          type: 'original'
+        },
         priority: this.calculatePriority(context)
       };
 
       // Queue the message
       const messageId = await this.messageQueue.queueMessage(queueMessage);
+
+      // Log additional information for redirected tweets
+      if (context.metadata.redirectReason) {
+        this.logger.info(`Sending redirected tweet to ${context.metadata.redirectReason === 'competitor_tweet' ? 'Competitor Tweets' : 'Competitor Mentions'} channel`, {
+          tweetId: context.tweet.id,
+          topicId: context.topicId,
+          redirectReason: context.metadata.redirectReason,
+          mentionedCompetitors: context.metadata.mentionedCompetitors,
+          tweetUsername: context.tweet.tweetBy.userName
+        });
+      }
 
       if (!messageId) {
         return {
@@ -90,6 +109,17 @@ export class SendStage implements PipelineStage<TweetContext, TweetContext> {
             errorType: 'QUEUE_ERROR'
           }
         };
+      }
+      
+      // Mark tweet as seen immediately after queuing to prevent duplicates
+      // This is in addition to the marking that happens after sending
+      if (context.tweet?.id && context.topicId) {
+        this.logger.info(`Marking tweet as seen after queuing`, {
+          tweetId: context.tweet.id,
+          topicId: context.topicId,
+          queueMessageId: messageId
+        });
+        await this.storage.markSeen(context.tweet.id, context.topicId);
       }
 
       // Get queue status

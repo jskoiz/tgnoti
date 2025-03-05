@@ -7,7 +7,6 @@ import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { RettiwtErrorHandler } from '../../twitter/RettiwtErrorHandler.js';
 import { SearchQueryConfig } from '../../../types/twitter.js';
 import { LoggingConfig } from '../../../config/loggingConfig.js';
-import { SearchConfig } from '../../../config/searchConfig.js';
 
 @injectable()
 export class ValidationStage implements PipelineStage<TweetContext, TweetContext> {
@@ -23,8 +22,7 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
     @inject(TYPES.Storage) private storage: Storage,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.RettiwtErrorHandler) private errorHandler: RettiwtErrorHandler,
-    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig,
-    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig
+    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig
   ) {
     this.logger.setComponent('ValidationStage');
     this.validationAggregator.window = this.loggingConfig.getAggregationWindow('ValidationStage');
@@ -45,13 +43,9 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
     };
   }
 
-  /**
-   * Execute the validation stage
-   */
   async execute(context: TweetContext): Promise<StageResult<TweetContext>> {
     const startTime = Date.now();
 
-    // Log validation start with context
     const initialContext = this.createLogContext(context, {
       phase: 'start',
       tweetData: {
@@ -61,7 +55,6 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
     });
     this.logger.debug('Starting validation', initialContext);
 
-    // Initialize validation status with default values
     const updatedContext: TweetContext = {
       ...context,
       validated: false,
@@ -72,60 +65,6 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
     };
 
     try {
-      const seen = await this.storage.hasSeen(context.tweet.id, context.topicId);
-      if (seen) {
-        const logContext = this.createLogContext(context, {
-          status: 'skipped',
-          reason: 'duplicate'
-        });
-
-        if (this.logger.shouldLog(LogLevel.DEBUG, this.validationAggregator)) {
-          this.logger.debug('Skipping duplicate tweet', logContext);
-          this.logger.updateAggregator(this.validationAggregator);
-        }
-
-        return {
-          success: true,
-          data: updatedContext,
-          metadata: {
-            reason: 'duplicate',
-            tweetId: context.tweet.id,
-            topicId: context.topicId,
-            validation: {
-              isValid: false,
-              status: 'skipped'
-            },
-            skipped: true,
-          }
-        };
-      }
-
-      // Validate tweet age
-      const ageValidation = this.validateTweetAge(updatedContext);
-      if (!ageValidation.valid) {
-        const logContext = this.createLogContext(context, {
-          status: 'failed',
-          phase: 'age',
-          reason: ageValidation.reason,
-          validationType: 'age',
-          tweetAge: ageValidation.age
-        });
-
-        this.logger.debug('Age validation failed', logContext);
-
-        return {
-          success: false,
-          data: updatedContext,
-          error: new Error(ageValidation.reason),
-          metadata: {
-            reason: 'age_validation',
-            status: 'failed',
-            validation: { isValid: false },
-            details: ageValidation.reason
-          }
-        };
-      }
-
       // Validate tweet content
       const contentValidation = this.validateTweetContent(updatedContext);
       if (!contentValidation.valid) {
@@ -137,6 +76,7 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         });
 
         this.logger.debug('Content validation failed', logContext);
+        this.metrics.increment('pipeline.validation.content.failure');
 
         return {
           success: false,
@@ -173,6 +113,7 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         });
 
         this.logger.debug('Engagement validation failed', logContext);
+        this.metrics.increment('pipeline.validation.engagement.failure');
 
         return {
           success: false,
@@ -194,7 +135,7 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         await this.storage.storeTweet(context.tweet, context.topicId);
         this.metrics.increment('pipeline.validation.storage.success');
         this.metrics.timing('pipeline.validation.storage.duration', Date.now() - storageStartTime);
-      } catch (error) {
+      } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.error('Failed to store tweet data', error instanceof Error ? error : new Error(String(error)), {
           tweetId: context.tweet.id,
@@ -230,7 +171,8 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         }
       };
 
-      this.recordMetrics(startTime, true);
+      this.metrics.increment('pipeline.validation.success');
+      this.metrics.timing('pipeline.validation.duration', Date.now() - startTime);
 
       const successContext = this.createLogContext(context, {
         status: 'success',
@@ -255,7 +197,7 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         }
       };
 
-    } catch (error) {
+    } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
       const errorContext = this.createLogContext(context, {
         status: 'error',
@@ -266,7 +208,8 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
       });
 
       this.logger.error('Validation failed', err, errorContext);
-      this.recordMetrics(startTime, false);
+      this.metrics.increment('pipeline.validation.error');
+      this.metrics.timing('pipeline.validation.duration', Date.now() - startTime);
       
       return {
         success: false,
@@ -282,39 +225,6 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
         }
       };
     }
-  }
-
-  /**
-   * Validate tweet age against SEARCH_WINDOW_MINUTES
-   */
-  private validateTweetAge(context: TweetContext): { valid: boolean; reason?: string; age?: number } {
-    const { tweet } = context;
-    const tweetDate = new Date(tweet.createdAt);
-    const now = new Date();
-    const ageInMinutes = (now.getTime() - tweetDate.getTime()) / (60 * 1000);
-    const maxAge = this.searchConfig.getSearchWindowMinutes();
-    const isValid = ageInMinutes <= maxAge;
-
-    // Add detailed logging for age validation
-    this.logger.info('Tweet age validation', {
-      tweetId: tweet.id,
-      tweetText: tweet.text?.substring(0, 50) + '...',
-      tweetDate: tweetDate.toISOString(),
-      currentTime: now.toISOString(),
-      ageInMinutes: Math.round(ageInMinutes),
-      configuredMaxAge: maxAge,
-      searchWindowFromEnv: process.env.SEARCH_WINDOW_MINUTES,
-      isValid,
-      validation: {
-        reason: isValid ? 'within window' : `exceeds ${maxAge} minute window`
-      }
-    });
-
-    if (ageInMinutes > maxAge) {
-      return { valid: false, reason: `Tweet age (${Math.round(ageInMinutes)} minutes) exceeds maximum allowed age (${maxAge} minutes)`, age: ageInMinutes };
-    }
-
-    return { valid: true, age: ageInMinutes };
   }
 
   /**
@@ -366,14 +276,5 @@ export class ValidationStage implements PipelineStage<TweetContext, TweetContext
     }
 
     return true;
-  }
-
-  /**
-   * Record validation metrics
-   */
-  private recordMetrics(startTime: number, success: boolean): void {
-    const duration = Date.now() - startTime;
-    this.metrics.timing('pipeline.validation.duration', duration);
-    this.metrics.increment(`pipeline.validation.${success ? 'success' : 'failure'}`);
   }
 }

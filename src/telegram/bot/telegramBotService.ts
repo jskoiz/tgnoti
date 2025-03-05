@@ -18,12 +18,12 @@ export class TelegramBotService {
     }
     
     this.bot = new TelegramBotApi(config.telegram.api.botToken, { 
-      polling: true,
+      polling: false, // Disable automatic polling to prevent conflicts
       filepath: false,
       baseApiUrl: 'https://api.telegram.org',
       testEnvironment: false
     });
-    this.logger.debug('TelegramBotService initialized');
+    this.logger.info('TelegramBotService initialized with polling disabled');
   }
 
   getBot(): TelegramBotApi {

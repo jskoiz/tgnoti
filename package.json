@@ -7,13 +7,15 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "predev": "rm -f telegram-bot.lock",
+    "predev": "(pkill -f 'node --loader ts-node/esm' || true) && (pkill -f 'nodemon.*src/index.ts' || true) && rm -f telegram-bot.lock",
     "dev": "NODE_NO_WARNINGS=1 nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write 'src/**/*.ts'",
     "clean": "rm -rf dist",
     "prebuild": "npm run clean",
-    "test": "jest"
+    "test": "jest",
+    "dashboard": "NODE_NO_WARNINGS=1 ts-node tools/show-dashboard.ts",
+    "log-viewer": "NODE_NO_WARNINGS=1 SHOW_DASHBOARD=true nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts"
   },
   "keywords": [
     "twitter",

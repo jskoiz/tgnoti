@@ -11,6 +11,17 @@ import { Logger, LogContext, LogAggregator } from '../types/logger.js';
  */
 export class DefaultLogService implements Logger {
   /**
+   * Context-based filtering rules
+   */
+  private static filterRules = {
+    // Skip detailed logs for old tweets (over 60 minutes)
+    skipOldTweets: true,
+    // Skip detailed logs for duplicate tweets
+    skipDuplicates: true,
+    // Skip detailed stage logs when summarized logging is enabled
+    useSummarizedLogging: true
+  };
+  /**
    * Create a new DefaultLogService
    * 
    * @param component The component name
@@ -148,7 +159,7 @@ export class DefaultLogService implements Logger {
    * @returns boolean indicating if the message should be logged
    */
   shouldLog(level: LogLevel, aggregator?: LogAggregator): boolean {
-    return level <= this.level;
+    return level <= this.level; 
   }
 
   /**
@@ -173,6 +184,11 @@ export class DefaultLogService implements Logger {
   private log(level: LogLevel, message: string, error?: Error, context?: LogContext): void {
     // Skip if the log level is higher than the configured level
     if (level > this.level) return;
+
+    // Apply context-based filtering
+    if (this.shouldFilterBasedOnContext(message, context)) {
+      return;
+    }
     
     // Create the log entry
     const entry: LogEntry = {
@@ -204,5 +220,45 @@ export class DefaultLogService implements Logger {
       stack: error.stack,
       code: (error as any).code
     };
+  }
+
+  /**
+   * Determine if a log message should be filtered based on context
+   * 
+   * @param message The log message
+   * @param context The log context
+   * @returns True if the message should be filtered out
+   */
+  private shouldFilterBasedOnContext(message: string, context?: LogContext): boolean {
+    // Skip detailed stage logs when summarized logging is enabled and we're in a large batch
+    if (DefaultLogService.filterRules.useSummarizedLogging && 
+        context?.status?.toString().includes('STAGE_') && 
+        !message.includes('SUMMARY') && 
+        !message.includes('BATCH') &&
+        context?.tweetCount && 
+        context.tweetCount > 5) {
+      // Allow only the first and last few tweets to be logged in detail
+      return true;
+    }
+    
+    // Skip detailed logs for old tweets
+    if (DefaultLogService.filterRules.skipOldTweets && 
+        context?.ageInMinutes && 
+        context.ageInMinutes > 60 && 
+        !message.includes('SUMMARY') && 
+        !message.includes('BATCH') &&
+        !message.includes('HINT') &&
+        !message.includes('CONFIG')) {
+      return true;
+    }
+
+    // Skip detailed logs for duplicate tweets
+    if (DefaultLogService.filterRules.skipDuplicates &&
+        message.includes('duplicate') &&
+        !message.includes('SUMMARY')) {
+      return true;
+    }
+    
+    return false;
   }
 }

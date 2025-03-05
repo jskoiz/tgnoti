@@ -49,7 +49,26 @@ export class LoggerFactory {
   private static instance: LoggerFactory;
   private config: LoggingConfig = {
     defaultLevel: LogLevel.INFO,
-    format: 'text'
+    format: 'text',
+    componentLevels: {
+      'DuplicateCheckStage': LogLevel.INFO,
+      'FilterStage': LogLevel.INFO,
+      'ValidationStage': LogLevel.INFO,
+      'TweetProcessor': LogLevel.DEBUG,
+      'SearchConfig': LogLevel.INFO,
+      'SearchStrategy': LogLevel.INFO,
+      'TwitterNotifier': LogLevel.DEBUG,
+      'RateLimitedQueue': LogLevel.DEBUG,
+      'TwitterClient': LogLevel.DEBUG,
+      'TelegramMessageSender': LogLevel.DEBUG,
+      'TelegramMessageQueue': LogLevel.DEBUG,
+      'MongoDBManager': LogLevel.INFO,
+      'ConfigManager': LogLevel.INFO
+    },
+    globalMetadata: {
+      app: 'twitter-notifier',
+      environment: process.env.NODE_ENV || 'development'
+    }
   };
   private transports: LogTransport[] = [];
   
@@ -71,10 +90,13 @@ export class LoggerFactory {
    * @param config The logging configuration
    */
   configure(config: LoggingConfig): void {
+    // Merge component levels
+    const componentLevels = { ...this.config.componentLevels, ...config.componentLevels };
+    
     this.config = {
       ...this.config,
-      ...config
-    };
+      ...config,
+      componentLevels };
     this.setupTransports();
   }
   

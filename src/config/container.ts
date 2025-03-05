@@ -36,20 +36,17 @@ import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
 import { TwitterNotifier } from '../core/TwitterNotifier.js';
 import { MonitoringDashboard } from '../core/monitoring/MonitoringDashboard.js';
 import { DateValidator } from '../utils/dateValidation.js';
+import { TweetProcessor } from '../core/TweetProcessor.js';
 import { TweetProcessingPipeline } from '../core/pipeline/TweetProcessingPipeline.js';
 import { FetchStage } from '../core/pipeline/stages/FetchStage.js';
+import { AgeValidationStage } from '../core/pipeline/stages/AgeValidationStage.js';
+import { DuplicateCheckStage } from '../core/pipeline/stages/DuplicateCheckStage.js';
 import { ValidationStage } from '../core/pipeline/stages/ValidationStage.js';
 import { FilterStage } from '../core/pipeline/stages/FilterStage.js';
 import { FormatStage } from '../core/pipeline/stages/FormatStage.js';
 import { SendStage } from '../core/pipeline/stages/SendStage.js';
 import { UsernameHandler } from '../utils/usernameHandler.js';
 
-// Event-based system
-import { EventBus } from '../core/events/EventBus.js';
-import { EventProcessor } from '../core/events/EventProcessor.js';
-import { EligibilityHandler } from '../core/events/handlers/EligibilityHandler.js';
-import { FormatterHandler } from '../core/events/handlers/FormatterHandler.js';
-import { SenderHandler } from '../core/events/handlers/SenderHandler.js';
 import TelegramBotApi from 'node-telegram-bot-api';
 import { TelegramQueueConfig } from '../types/telegram.js';
 import { TelegramConfig } from './telegram.js';
@@ -120,13 +117,6 @@ export function createContainer(): Container {
   container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
   container.bind<MonitoringDashboard>(TYPES.MonitoringDashboard).to(MonitoringDashboard).inSingletonScope();
   container.bind<UsernameHandler>(TYPES.UsernameHandler).to(UsernameHandler).inSingletonScope();
-  
-  // Event System
-  container.bind<EventBus>(TYPES.EventBus).to(EventBus).inSingletonScope();
-  container.bind<EventProcessor>(TYPES.EventProcessor).to(EventProcessor).inSingletonScope();
-  container.bind<EligibilityHandler>(TYPES.EligibilityHandler).to(EligibilityHandler).inSingletonScope();
-  container.bind<FormatterHandler>(TYPES.FormatterHandler).to(FormatterHandler).inSingletonScope();
-  container.bind<SenderHandler>(TYPES.SenderHandler).to(SenderHandler).inSingletonScope();
   container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
 
   // Twitter Related
@@ -136,6 +126,7 @@ export function createContainer(): Container {
   container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
   container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
   container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
+  container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
   
   // Pipeline Configuration
   container.bind<PipelineConfig>(TYPES.PipelineConfig).toConstantValue({
@@ -149,6 +140,8 @@ export function createContainer(): Container {
   
   // Pipeline Stages
   container.bind<FetchStage>(TYPES.FetchStage).to(FetchStage).inSingletonScope();
+  container.bind<DuplicateCheckStage>(TYPES.DuplicateCheckStage).to(DuplicateCheckStage).inSingletonScope();
+  container.bind<AgeValidationStage>(TYPES.AgeValidationStage).to(AgeValidationStage).inSingletonScope();
   container.bind<ValidationStage>(TYPES.ValidationStage).to(ValidationStage).inSingletonScope();
   container.bind<FilterStage>(TYPES.FilterStage).to(FilterStage).inSingletonScope();
   container.bind<FormatStage>(TYPES.FormatStage).to(FormatStage).inSingletonScope();
@@ -225,20 +218,15 @@ export async function initializeContainer(): Promise<Container> {
   // Initialize pipeline
   const pipeline = container.get<TweetProcessingPipeline>(TYPES.TweetProcessingPipeline);
   const fetchStage = container.get<FetchStage>(TYPES.FetchStage);
+  const duplicateCheckStage = container.get<DuplicateCheckStage>(TYPES.DuplicateCheckStage);
+  const ageValidationStage = container.get<AgeValidationStage>(TYPES.AgeValidationStage);
   const validationStage = container.get<ValidationStage>(TYPES.ValidationStage);
   const filterStage = container.get<FilterStage>(TYPES.FilterStage);
   const formatStage = container.get<FormatStage>(TYPES.FormatStage);
   const sendStage = container.get<SendStage>(TYPES.SendStage);
   
   // Add stages in order
-  [fetchStage, validationStage, filterStage, formatStage, sendStage].forEach(stage => pipeline.addStage(stage));
+  [fetchStage, duplicateCheckStage, ageValidationStage, validationStage, filterStage, formatStage, sendStage].forEach(stage => pipeline.addStage(stage));
   
-  // Initialize event handlers
-  // Just getting these instances will trigger their constructors which register event handlers
-  container.get<EventBus>(TYPES.EventBus);
-  container.get<EligibilityHandler>(TYPES.EligibilityHandler);
-  container.get<FormatterHandler>(TYPES.FormatterHandler);
-  container.get<SenderHandler>(TYPES.SenderHandler);
-
   return container;
 }

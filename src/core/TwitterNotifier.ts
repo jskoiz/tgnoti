@@ -6,7 +6,7 @@ import { Logger } from '../types/logger.js';
 import { Environment } from '../config/environment.js';
 import { TYPES } from '../types/di.js';
 import { DateValidator, DateValidationError } from '../utils/dateValidation.js';
-import { EventProcessor } from './events/EventProcessor.js';
+import { TweetProcessor } from './TweetProcessor.js';
 import { SearchStrategy } from './twitter/searchStrategy.js';
 import { MetricsManager } from './monitoring/MetricsManager.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
@@ -24,7 +24,7 @@ export class TwitterNotifier {
     @inject(TYPES.Environment) private environment: Environment,
     @inject(TYPES.Storage) private storage: Storage,
     @inject(TYPES.DateValidator) private dateValidator: DateValidator,
-    @inject(TYPES.EventProcessor) private eventProcessor: EventProcessor,
+    @inject(TYPES.TweetProcessor) private tweetProcessor: TweetProcessor,
     @inject(TYPES.SearchStrategy) private searchStrategy: SearchStrategy,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.ErrorHandler) private errorHandler: ErrorHandler,
@@ -34,17 +34,27 @@ export class TwitterNotifier {
   async initialize(): Promise<void> {
     try {
       const startTime = Date.now();
-      this.logger.info('Starting initialization');
+      this.logger.info('Starting TwitterNotifier initialization');
 
       // System checks
       await this.dateValidator.validateSystemTime();
       this.environment.validateEnvironment();
       await this.storage.getConfig();
       await this.storage.verify();
+      
+      // Initialize Telegram bot
+      try {
+        this.logger.info('Initializing Telegram bot');
+        await this.telegram.initialize();
+        this.logger.info('Telegram bot initialized successfully');
+      } catch (telegramError) {
+        this.logger.error('Failed to initialize Telegram bot', telegramError instanceof Error ? telegramError : new Error(String(telegramError)));
+        throw telegramError;
+      }
 
       const initTime = Date.now() - startTime;
       this.metrics.timing('notifier.init_time', initTime);
-      this.logger.logObject('info', 'Initialization complete', { duration: `${initTime}ms` });
+      this.logger.logObject('info', 'TwitterNotifier initialization complete', { duration: `${initTime}ms` });
 
     } catch (error) {
       if (error instanceof DateValidationError) {
@@ -66,10 +76,16 @@ export class TwitterNotifier {
 
       // Get environment config which includes monitoring settings
       const envConfig = this.environment.getConfig();
+      
+      this.logger.debug('Starting notifier', {
+        system: 'pipeline',
+        pollingInterval: envConfig.monitoring.polling.intervalMinutes
+      });
+      
       this.isRunning = true;
       this.metrics.gauge('notifier.running', 1);
 
-      this.logger.info('Notifier started');
+      this.logger.debug('Notifier started');
 
       // Main processing loop
       while (this.isRunning) {
@@ -84,38 +100,49 @@ export class TwitterNotifier {
           // Process each monitoring account
           for (const monitoringAccount of MONITORING_ACCOUNTS) {
             // Get search window from config
-            const { startDate, endDate } = await this.searchConfig.createSearchWindow();
-            this.logger.logObject('debug', 'Search window', {
-              account: monitoringAccount.account,
-              window: `${new Date(startDate).toLocaleTimeString()} - ${new Date(endDate).toLocaleTimeString()}`
-            });
+            const window = await this.searchConfig.createSearchWindow();
+            const topicId = monitoringAccount.topicId.toString();
 
-            // Get new tweets using SearchStrategy
-            const tweets = await this.searchStrategy.search({
-              username: monitoringAccount.account,
-              startDate,
-              endDate,
-              excludeRetweets: true,
-              excludeQuotes: true,
-              language: 'en'
-            });
+            // Validate search window to prevent duplicate processing
+            if (await this.searchConfig.validateSearchWindow(topicId, window)) {
+              this.logger.logObject('debug', 'Processing search window', {
+                account: monitoringAccount.account,
+                window: `${new Date(window.startDate).toLocaleTimeString()} - ${new Date(window.endDate).toLocaleTimeString()}`
+              });
 
-            // Process each tweet through the pipeline
-            for (const tweet of tweets) {
-              // Process tweet through the event system
-              await this.eventProcessor.processTweet(tweet, monitoringAccount.topicId.toString());
-              
-              // With event-based system, we just count processed tweets
-              // Success/failure is tracked via events and metrics
-              processed++;
-              sent++; // Assume sent for now, metrics will track actual success/failure
-              
+              // Get new tweets using SearchStrategy
+              const tweets = await this.searchStrategy.search({
+                username: monitoringAccount.account,
+                startDate: window.startDate,
+                endDate: window.endDate,
+                excludeRetweets: true,
+                excludeQuotes: true,
+                language: 'en'
+              });
+
+              if (tweets.length > 0) {
+                const batchStartTime = Date.now();
+
+                // Process tweets in batch
+                await this.tweetProcessor.processTweetBatch(tweets, topicId);
+
+                // Update metrics
+                processed += tweets.length;
+                sent += tweets.length; // Actual success/failure tracked in processor
+                
+                this.metrics.timing('notifier.pipeline.batch_processing_time', Date.now() - batchStartTime);
+                this.metrics.increment('notifier.pipeline.tweets_processed', tweets.length);
+              }
+            } else {
+              this.logger.debug('Skipping already processed window', { topicId });
             }
+
           }
           
           // Log processing summary
-          this.logger.logObject('info', 'Processing cycle complete', {
-            stats: `${processed} processed, ${sent} sent, ${errors} errors`
+          this.logger.logObject('debug', 'Processing cycle complete', {
+            stats: `${processed} processed, ${sent} sent, ${errors} errors`,
+            system: 'pipeline'
           });
           
           // Perform storage cleanup
@@ -163,6 +190,6 @@ export class TwitterNotifier {
       }
     }
 
-    this.logger.info('Notifier stopped');
+    this.logger.debug('Notifier stopped');
   }
 }

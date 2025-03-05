@@ -42,10 +42,16 @@ export interface SendStageMetadata {
 export interface StageMetadata {
   send?: SendStageMetadata;
   skipped?: boolean;
+  redirectReason?: 'competitor_tweet' | 'competitor_mention';
+  mentionedCompetitors?: string[];
+  source?: string;
+  retryCount?: number;
+  processingStartTime?: number;
   message?: string;
   reason?: string;
   errorType?: string;
   errorMessage?: string;
+  batchSize?: number;
   validationDurationMs?: number;
   validation?: {
     isValid: boolean;

@@ -8,6 +8,7 @@ import { RettiwtKeyManager } from './rettiwtKeyManager.js';
 import { LoggingConfig } from '../../config/loggingConfig.js';
 import { Rettiwt } from 'rettiwt-api';
 import { RettiwtErrorHandler } from './RettiwtErrorHandler.js';
+import { Environment } from '../../config/environment.js';
 
 interface RettiwtSearchResponse {
   list: any[];
@@ -25,13 +26,15 @@ export class TwitterClient {
     @inject(TYPES.RateLimitedQueue) private queue: RateLimitedQueue,
     @inject(TYPES.RettiwtKeyManager) private keyManager: RettiwtKeyManager,
     @inject(TYPES.RettiwtErrorHandler) private errorHandler: RettiwtErrorHandler,
-    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig
+    @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig,
+    @inject(TYPES.Environment) private environment: Environment
   ) {
     this.logger.setComponent('TwitterClient');
     
-    // Get rate limit from environment variable or use default
-    const rateLimit = Number(process.env.TWITTER_RATE_LIMIT) || 1;
-    this.logger.info(`Setting Twitter API rate limit to ${rateLimit} requests per second`);
+    // Get rate limit from config
+    const config = this.environment.getConfig().twitter.rateLimit;
+    const rateLimit = config.requestsPerSecond;
+    this.logger.info('Setting Twitter API rate limit', { rateLimit, safetyFactor: config.safetyFactor });
     this.queue.setRateLimit(rateLimit);
     this.client = this.createClient();
   }
@@ -46,29 +49,31 @@ export class TwitterClient {
   private createClient(): Rettiwt {
     const apiKey = this.keyManager.getCurrentKey();
     
-    // Validate API key format
-    if (!this.isValidApiKey(apiKey)) {
-      const context = this.createLogContext({
-        keyLength: apiKey?.length || 0,
-        keyPrefix: apiKey?.substring(0, 4),
-        isBase64: this.isBase64(apiKey)
+    // Add very detailed logging for API key validation
+    this.logger.debug(`Validating API key format: length=${apiKey?.length || 0}, prefix=${apiKey?.substring(0, 4) || 'none'}`);
+    this.logger.debug(`API key contains auth_token: ${apiKey?.includes('auth_token=')}`);
+    this.logger.debug(`API key contains twid: ${apiKey?.includes('twid=')}`);
+    
+    // Try to create the client regardless of validation
+    try {
+      const client = new Rettiwt({ 
+        apiKey: apiKey,
+        timeout: this.REQUEST_TIMEOUT
       });
-      this.logger.error('Invalid API key format', new Error('Invalid API key'), context);
-      throw new Error('Invalid API key format');
+      
+      this.logger.debug('Successfully created Rettiwt client', {
+        clientKeys: Object.keys(client || {}),
+        hasTweet: !!client.tweet,
+        tweetKeys: Object.keys(client.tweet || {})
+      });
+      
+      return client;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Error creating Rettiwt client: ${err.message}`);
+      throw new Error(`Failed to create Rettiwt client: ${err.message}`);
     }
     
-    const context = this.createLogContext({
-      keyLength: apiKey?.length || 0,
-      keyPrefix: apiKey?.substring(0, 4),
-      currentKeyIndex: this.keyManager.getCurrentKeyIndex(),
-      isBase64: this.isBase64(apiKey)
-    });
-    this.logger.debug('Creating Rettiwt client', context);
-
-    return new Rettiwt({ 
-      apiKey: apiKey,
-      timeout: this.REQUEST_TIMEOUT
-    });
   }
 
   async getUserDetails(username: string): Promise<TweetUser | null> {
@@ -99,8 +104,6 @@ export class TwitterClient {
     const startTime = Date.now();
     try {
       this.metrics.increment('twitter.search.attempt');
-      const context = this.createLogContext({ filter });
-      this.logger.debug('Starting tweet search', context);
       
       await this.queue.initialize();
       const result = await this.queue.add(async () => {
@@ -122,12 +125,17 @@ export class TwitterClient {
       this.metrics.timing('twitter.search.duration', Date.now() - startTime);
       return result;
     } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      
+      // Only increment metrics for rate limit errors, let the error handler manage the rest
       this.metrics.increment('twitter.search.error');
       this.metrics.timing('twitter.search.error_duration', Date.now() - startTime);
       
-      // Let the error handler manage retries and cooldowns
-      this.errorHandler.handle(error);
-      throw error;
+      // For rate limits, just pass to error handler without additional logging
+      if (err.message?.includes('TOO_MANY_REQUESTS') || err.message?.includes('Rate limit')) {
+        this.errorHandler.handle(error);
+      }
+      throw err;
     }
   }
 
@@ -148,14 +156,13 @@ export class TwitterClient {
       advancedFilters: { include_replies: params.replies || false }
     };
 
-    const context = this.createLogContext({
-      accounts: searchConfig.accounts,
-      startTime: searchConfig.startTime,
-      endTime: searchConfig.endTime,
-      excludeRetweets: searchConfig.excludeRetweets,
-      excludeQuotes: searchConfig.excludeQuotes
+    // Add detailed logging for search parameters
+    this.logger.debug('Twitter search parameters', {
+      accounts: params.fromUsers,
+      startTime: params.startDate?.toISOString(),
+      endTime: params.endDate?.toISOString(),
+      language: params.language || 'en'
     });
-    this.logger.debug('Starting search with config', context);
 
     // Check if we're in cooldown before attempting search
     if (this.errorHandler.isInCooldown()) {
@@ -178,22 +185,41 @@ export class TwitterClient {
         throw new Error('Invalid Rettiwt client state');
       }
 
-      const result = await this.client.tweet.search(searchConfig) as RettiwtSearchResponse;
+     // Log client state before search
+      this.logger.debug(`Client state before search: hasClient=${!!this.client}, hasSearchMethod=${!!this.client?.tweet?.search}`);
       
-      if (!result?.list) {
-        throw new Error('Invalid search response');
+      try {
+       const result = await this.client.tweet.search(searchConfig) as RettiwtSearchResponse;
+        
+        // Log successful search
+        this.logger.debug(`Search successful, received ${result?.list?.length || 0} results`);
+        
+        if (!result?.list) {
+          this.logger.warn(`Invalid search response: missing list property. Available keys: ${result ? Object.keys(result).join(', ') : 'null'}`);
+          throw new Error('Invalid search response');
+        }
+        
+        // Log first result for debugging
+        if (result.list.length > 0) {
+          const firstTweet = result.list[0];
+          this.logger.debug(`First tweet in results: ID=${firstTweet.id || 'unknown'}, by @${firstTweet.user?.username || 'unknown'}`);
+        }
+        
+        return result.list.map(tweet => mapRettiwtTweetToTweet(tweet));
+      } catch (searchError) {
+        // Specific error handling for the search call
+        this.logger.error(`Search API call failed: ${searchError instanceof Error ? searchError.message : String(searchError)}`);
+        throw searchError;
       }
-
-      const successContext = this.createLogContext({
-        resultCount: result.list.length,
-        firstTweetId: result.list[0]?.id,
-        config: searchConfig
-      });
-      this.logger.debug('Search successful', successContext);
-      
-      return result.list.map(tweet => mapRettiwtTweetToTweet(tweet));
     } catch (error) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
+      
+      // Add detailed error logging
+      const hasResponse = !!(error as any)?.response;
+      const responseStatus = (error as any)?.response?.status;
+      const responseHeaders = (error as any)?.response?.headers;
+      this.logger.error(`Error in Twitter search: ${errorObj.message}. Response status: ${responseStatus || 'none'}`);
+      
       const errorContext = this.createLogContext({
         errorDetails: {
           type: errorObj.constructor.name,
@@ -201,8 +227,15 @@ export class TwitterClient {
           stack: errorObj.stack
         }
       });
-      this.logger.error(`Search attempt failed`, errorObj, errorContext);
-      throw error;
+      
+      // Extract retry-after header from Rettiwt response
+      const retryAfter = (error as any)?.response?.headers?.['retry-after'];
+      if (retryAfter) {
+        const enhancedError = new Error('TOO_MANY_REQUESTS');
+        (enhancedError as any).response = { headers: { 'retry-after': retryAfter } };
+        throw enhancedError;
+      }
+      throw errorObj;
     }
   }
 
@@ -236,6 +269,17 @@ export class TwitterClient {
   }
 
   private isValidApiKey(key: string): boolean {
-    return typeof key === 'string' && key.length >= 32 && this.isBase64(key);
+    const isValid = typeof key === 'string' && key.length >= 32 && key.includes('auth_token=') && key.includes('twid=');
+    
+    // Add detailed logging for key validation
+    this.logger.debug('API key validation result', {
+      isString: typeof key === 'string',
+      hasMinLength: key?.length >= 32,
+      hasAuthToken: key?.includes('auth_token='),
+      hasTwid: key?.includes('twid='),
+      isValid
+    });
+    
+    return isValid;
   }
 }

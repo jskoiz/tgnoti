@@ -25,7 +25,6 @@ export interface AppConfig { // Updated to use only TwitterConfigV2
   storage: StorageConfig;
 }
 
-
 export interface RetryPolicy {
   maxAttempts: number;
   baseDelay: number;
@@ -33,7 +32,6 @@ export interface RetryPolicy {
   jitter: boolean;
 }
 
-// Default retry policy
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxAttempts: 3,
   baseDelay: 1000,
@@ -55,6 +53,10 @@ const ENV = {
   TWITTER_RATE_LIMIT: 'TWITTER_RATE_LIMIT',
   TWITTER_TOPIC_DELAY_MS: 'TWITTER_TOPIC_DELAY_MS',
   TWITTER_MIN_RATE: 'TWITTER_MIN_RATE',
+  TWITTER_RATE_REDUCTION_FACTOR: 'TWITTER_RATE_REDUCTION_FACTOR',
+  TWITTER_RECOVERY_DELAY: 'TWITTER_RECOVERY_DELAY',
+  TWITTER_RECOVERY_FACTOR: 'TWITTER_RECOVERY_FACTOR',
+  TWITTER_MAX_RATE: 'TWITTER_MAX_RATE',
   TWITTER_QUEUE_CHECK_INTERVAL: 'TWITTER_QUEUE_CHECK_INTERVAL',
   TWITTER_CACHE_TTL: 'TWITTER_CACHE_TTL',
   TWITTER_CACHE_MAX_ENTRIES: 'TWITTER_CACHE_MAX_ENTRIES',
@@ -79,7 +81,7 @@ const ENV = {
   RETRY_BASE_DELAY: 'RETRY_BASE_DELAY',
   RETRY_MAX_DELAY: 'RETRY_MAX_DELAY',
   RETRY_JITTER: 'RETRY_JITTER',
-  MONGO_DB_STRING: 'MONGO_DB_STRING'
+  MONGO_DB_STRING: 'MONGO_DB_STRING',
 } as const;
 
 /**
@@ -89,9 +91,7 @@ const DEFAULTS = {
   twitter: {
     timeout: 10000,
     rateLimit: {
-      defaultRate: 1,
-      minRate: 0.1,
-      queueCheckInterval: 1000
+      defaultRate: 1
     },
     cache: {
       userDetailsTTL: 5 * 60 * 1000,
@@ -147,6 +147,13 @@ function getEnvVar(name: keyof typeof ENV, required = false): string | undefined
  */
 function getEnvBool(name: keyof typeof ENV, defaultValue: boolean): boolean {
   const value = getEnvVar(name);
+    console.log('Loading boolean env var', {
+      name,
+      envKey: ENV[name],
+      value,
+      defaultValue,
+      result: value === undefined ? defaultValue : value.toLowerCase() === 'true'
+    });
   if (value === undefined) return defaultValue;
   return value.toLowerCase() === 'true';
 }
@@ -260,20 +267,9 @@ export class Environment {
         }
       },
       rateLimit: {
-        requestsPerSecond: Number(process.env.TWITTER_RATE_LIMIT) || 1,
-        minRate: Number(process.env.TWITTER_MIN_RATE) || 0.1,
-        safetyFactor: 0.75,
-        topicDelay: Number(process.env.TWITTER_TOPIC_DELAY_MS) || 30000,
-        backoff: {
-          initialDelay: 1000,
-          maxDelay: 60000,
-          multiplier: 3
-        },
-        cooldown: {
-          duration: 15 * 60 * 1000,
-          retryAfter: 15000
-        }
-      },
+        requestsPerSecond: getEnvNumber('TWITTER_RATE_LIMIT', DEFAULTS.twitter.rateLimit.defaultRate),
+        safetyFactor: 0.95  // Increased from 0.75 since we have multiple layers of rate limiting
+      } as RateLimitConfig,
       cache: {
         userDetailsTTL: getEnvNumber('TWITTER_CACHE_TTL', DEFAULTS.twitter.cache.userDetailsTTL),
         maxEntries: getEnvNumber('TWITTER_CACHE_MAX_ENTRIES', DEFAULTS.twitter.cache.maxEntries)
@@ -396,7 +392,7 @@ export class Environment {
       monitoring,
       storage: {
         cleanupAgeDays: getTweetCleanupAgeDays()
-      }
+      },
     };
 
     // Validate the configuration

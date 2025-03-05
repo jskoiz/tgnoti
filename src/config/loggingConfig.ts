@@ -23,25 +23,41 @@ export class LoggingConfig {
   // Component-specific logging configurations
   private readonly componentConfigs: Record<string, ComponentLogConfig> = {
     'RateLimitedQueue': {
-      level: LogLevel.WARN,
+      level: LogLevel.DEBUG,
       heartbeatInterval: 5000,     // 5s for more frequent health checks
       aggregationWindow: 30000     // 30s window for rate limit aggregation
+    },
+    'TwitterClient': {
+      level: LogLevel.DEBUG
+    },
+    'TelegramMessageSender': {
+      level: LogLevel.DEBUG
+    },
+    'TelegramMessageQueue': {
+      level: LogLevel.DEBUG
+    },
+    'DuplicateCheckStage': {
+      level: LogLevel.INFO
+    },
+    'FilterStage': {
+      level: LogLevel.INFO
     },
     'ValidationStage': {
       level: LogLevel.INFO,
       aggregationWindow: 10000     // 10s window for validation aggregation
     },
-    'TwitterClient': {
+    'TweetProcessor': {
+      level: LogLevel.INFO
+    },
+    'SearchConfig': {
       level: LogLevel.INFO
     },
     'SearchStrategy': {
       level: LogLevel.INFO
     },
-    'TelegramMessageSender': {
-      level: LogLevel.INFO
-    },
-    'TelegramMessageQueue': {
-      level: LogLevel.DEBUG
+    'TwitterNotifier': {
+      level: LogLevel.DEBUG,
+      aggregationWindow: 60000  // 1 minute window for notifier aggregation
     }
   };
 

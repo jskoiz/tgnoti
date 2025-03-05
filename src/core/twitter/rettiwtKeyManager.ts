@@ -90,11 +90,19 @@ export class RettiwtKeyManager {
     }
     
     // Add debug logging
-    this.logger.debug('Getting current key', {
+    this.logger.debug('Getting current API key', {
       currentKeyIndex: this.currentKeyIndex,
       totalKeys: this.apiKeys.length,
-      keyExists: this.currentKeyIndex < this.apiKeys.length
+      keyExists: this.currentKeyIndex < this.apiKeys.length,
+      keyLength: this.apiKeys[this.currentKeyIndex]?.length || 0,
+      keyPrefix: this.apiKeys[this.currentKeyIndex]?.substring(0, 4) || 'none'
     });
+    
+    // Validate key format
+    const currentKey = this.apiKeys[this.currentKeyIndex];
+    if (!this.isValidKey(currentKey)) {
+      this.logger.warn(`Current API key at index ${this.currentKeyIndex} appears invalid. Length: ${currentKey?.length || 0}, Prefix: ${currentKey?.substring(0, 4) || 'none'}`);
+    }
     
     return this.apiKeys[this.currentKeyIndex];
   }
@@ -241,6 +249,16 @@ export class RettiwtKeyManager {
     return healthyKeys.sort((a, b) => {
       const healthA = this.keyHealth.get(a) || this.initKeyHealth();
       const healthB = this.keyHealth.get(b) || this.initKeyHealth();
+      
+      // Add debug logging for key health comparison
+      this.logger.debug('Comparing key health', {
+        keyA: a.substring(0, 4),
+        keyB: b.substring(0, 4),
+        errorsA: healthA.errors,
+        errorsB: healthB.errors,
+        consecutiveFailuresA: healthA.consecutiveFailures,
+        consecutiveFailuresB: healthB.consecutiveFailures
+      });
 
       // First compare by error count
       const errorDiff = healthA.errors - healthB.errors;
@@ -251,6 +269,20 @@ export class RettiwtKeyManager {
       const timeB = healthB.lastSuccess ? healthB.lastSuccess.getTime() : 0;
       return timeB - timeA;
     })[0];
+  }
+
+  // Helper method to validate key format
+  private isValidKey(key: string): boolean {
+    if (!key || typeof key !== 'string') return false;
+    
+    // Check for minimum length
+    if (key.length < 30) return false;
+    
+    // Check for expected patterns in the key
+    const hasAuthToken = key.includes('auth_token=');
+    const hasTwid = key.includes('twid=');
+    
+    return hasAuthToken && hasTwid;
   }
 
   private isKeyUnhealthy(key: string): true | false {

@@ -43,7 +43,11 @@ export class ApiError extends AppError {
 
 // Rate limiting errors
 export class RateLimitError extends ApiError {
-  constructor(message: string, context?: Record<string, unknown>) {
+  constructor(
+    message: string,
+    public readonly retryAfter?: number,
+    context?: Record<string, unknown>
+  ) {
     super(429, message, context);
   }
 }

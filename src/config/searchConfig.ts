@@ -3,6 +3,21 @@ import { TYPES } from '../types/di.js';
 import { Logger } from '../types/logger.js';
 import { ConfigManager, ConfigValidation } from './ConfigManager.js';
 
+export interface TopicSearchConfig {
+  enableAgeFiltering?: boolean;
+  windowMinutes?: number;
+  enableUsernameFiltering?: boolean;
+  enableContentFiltering?: boolean;
+  overlapBufferMinutes?: number;
+}
+
+interface SearchWindow {
+  startDate: Date;
+  endDate: Date;
+  lastProcessed: Date;
+  processed: boolean;
+}
+
 /**
  * SearchConfig provides configuration for tweet search windows
  * 
@@ -14,9 +29,11 @@ import { ConfigManager, ConfigValidation } from './ConfigManager.js';
 @injectable()
 export class SearchConfig {
   private readonly defaultWindowMinutes = 5; // Default to 5-minute window
-  private readonly defaultOverlapBufferMinutes = 1; // Default to 1-minute overlap
-  private readonly defaultPastDays = 7; // Default to 7 days in the past
+  private readonly defaultOverlapBufferMinutes = 2; // Increased to 2-minute overlap
+  private readonly defaultPastDays = 3; // Reduced to 3 days in the past
   private readonly defaultFutureDays = 1; // Default to 1 day in the future
+  // Track active search windows by topicId
+  private activeWindows: Map<string, SearchWindow> = new Map();
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -37,7 +54,58 @@ export class SearchConfig {
     
     // Log the configured search window
     const configuredWindow = this.getSearchWindowMinutes();
-    this.logger.info(`Initialized SearchConfig with window: ${configuredWindow} minutes`);
+    this.logger.debug(`Initialized SearchConfig with window: ${configuredWindow} minutes`);
+  }
+
+  /**
+   * Validate if a search window has already been processed
+   * Returns true if window is valid for processing, false if already processed
+   */
+  async validateSearchWindow(
+    topicId: string,
+    window: { startDate: Date; endDate: Date }
+  ): Promise<boolean> {
+    const existingWindow = this.activeWindows.get(topicId);
+    
+    if (!existingWindow) {
+      // No existing window, create new one
+      this.activeWindows.set(topicId, {
+        ...window,
+        lastProcessed: new Date(),
+        processed: false
+      });
+      return true;
+    }
+
+    // Only reject if the new window is completely contained within the existing window
+    // This allows for partial overlap between consecutive windows
+    const overlap = (
+      window.startDate >= existingWindow.startDate &&
+      window.endDate <= existingWindow.endDate
+    );
+    
+    if (overlap && existingWindow.processed) {
+      this.logger.debug('Skipping already processed window', {
+        topicId,
+        existing: {
+          start: existingWindow.startDate,
+          end: existingWindow.endDate
+        },
+        new: {
+          start: window.startDate,
+          end: window.endDate
+        }
+      });
+      return false;
+    }
+
+    // Update window
+    this.activeWindows.set(topicId, {
+      ...window,
+      lastProcessed: new Date(),
+      processed: false
+    });
+    return true;
   }
 
   /**
@@ -50,11 +118,19 @@ export class SearchConfig {
     const endDate = new Date();
     const startDate = new Date(endDate.getTime() - (windowMinutes * 60 * 1000));
 
-    this.logger.debug('Created search window', {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      windowMinutes
-    });
+    // Clean up old windows
+    const now = new Date();
+    for (const [topicId, window] of this.activeWindows.entries()) {
+      const windowAge = now.getTime() - window.lastProcessed.getTime();
+      const maxAge = windowMinutes * 2 * 60 * 1000; // 2x window size
+      
+      if (windowAge > maxAge) {
+        this.logger.debug('Cleaning up old search window', {
+          topicId, windowAge: windowAge / 1000
+        });
+        this.activeWindows.delete(topicId);
+      }
+    }
 
     return { startDate, endDate };
   }
@@ -64,16 +140,7 @@ export class SearchConfig {
    */
   getSearchWindowMinutes(): number {
     const envValue = this.configManager.getEnvConfig<string>('SEARCH_WINDOW_MINUTES');
-    const windowMinutes = Number(envValue) || this.defaultWindowMinutes;
-    
-    this.logger.debug('Getting search window minutes', {
-      envValue,
-      parsedValue: Number(envValue),
-      finalValue: windowMinutes,
-      source: envValue ? 'environment' : 'default'
-    });
-    
-    return windowMinutes;
+    return Number(envValue) || this.defaultWindowMinutes;
   }
 
   /**
@@ -107,4 +174,50 @@ export class SearchConfig {
            this.defaultFutureDays;
   }
 
+  /**
+   * Get topic-specific search configuration
+   * Falls back to global defaults if topic config not found
+   */
+  async getTopicConfig(topicId: string): Promise<TopicSearchConfig> {
+    try {
+      const prefix = `TOPIC_${topicId}_`;
+      const enableAgeFiltering = this.configManager.getEnvConfig<string>(`${prefix}ENABLE_AGE_FILTERING`);
+      const windowMinutes = this.configManager.getEnvConfig<string>(`${prefix}WINDOW_MINUTES`);
+      const enableUsernameFiltering = this.configManager.getEnvConfig<string>(`${prefix}ENABLE_USERNAME_FILTERING`);
+      const enableContentFiltering = this.configManager.getEnvConfig<string>(`${prefix}ENABLE_CONTENT_FILTERING`);
+      const overlapBufferMinutes = this.configManager.getEnvConfig<string>(`${prefix}OVERLAP_BUFFER_MINUTES`);
+
+      return {
+        enableAgeFiltering: enableAgeFiltering === 'false' ? false : true,
+        windowMinutes: Number(windowMinutes) || this.getSearchWindowMinutes(),
+        enableUsernameFiltering: enableUsernameFiltering === 'false' ? false : true,
+        enableContentFiltering: enableContentFiltering === 'false' ? false : true,
+        overlapBufferMinutes: Number(overlapBufferMinutes) || this.getOverlapBufferMinutes()
+      };
+    } catch (error: unknown) {
+      this.logger.error('Failed to get topic config', error instanceof Error ? error : new Error(String(error)), {
+        topicId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Return default config on error
+      return {
+        enableAgeFiltering: true,
+        windowMinutes: this.getSearchWindowMinutes(),
+        enableUsernameFiltering: true,
+        enableContentFiltering: true,
+        overlapBufferMinutes: this.getOverlapBufferMinutes()
+      };
+    }
+  }
+
+  /**
+   * Mark a search window as processed
+   */
+  markWindowProcessed(topicId: string): void {
+    const window = this.activeWindows.get(topicId);
+    if (window) {
+      window.processed = true;
+      this.activeWindows.set(topicId, window);
+    }
+  }
 }

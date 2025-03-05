@@ -39,6 +39,15 @@ export class ConsoleTransport implements LogTransport {
   }
   
   log(entry: LogEntry): void {
+    // Add log category prefix based on component and message
+    if (this.format === 'text' && !entry.message.startsWith('[')) {
+      if (entry.component === 'TweetProcessor') entry.message = `[PROC] ${entry.message}`;
+      else if (entry.message.includes('pipeline') || entry.message.includes('Pipeline')) entry.message = `[PIPE] ${entry.message}`;
+      else if (entry.message.includes('stage') || entry.message.includes('Stage')) entry.message = `[STAGE] ${entry.message}`;
+      else if (entry.message.includes('search') || entry.message.includes('Search')) entry.message = `[SRCH] ${entry.message}`;
+      else if (entry.message.includes('valid') || entry.message.includes('Valid')) entry.message = `[VALD] ${entry.message}`;
+    }
+    
     const formatted = this.format === 'json' 
       ? JSON.stringify(entry)
       : this.formatText(entry);
@@ -65,11 +74,22 @@ export class ConsoleTransport implements LogTransport {
   }
   
   private formatText(entry: LogEntry): string | undefined {
-    // Format timestamp as [MM-DD HH:mm:ss]
+    // Format timestamp as [MM-DD HH:mm:ss] with color
     const date = new Date(entry.timestamp);
     const timestamp = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+    
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
+    
+    // Filter out specific messages from TweetProcessor
+    if (component === 'TweetProcessor') {
+      if (entry.message.includes('Processing search window')) return undefined;
+    }
+    
+    // Filter out specific messages from TwitterNotifier
+    if (component === 'TwitterNotifier') {
+      if (entry.message.includes('Processing search window')) return undefined;
+    }
     
     // Special formatting for TelegramMessageSender logs
     if (component === 'TelegramMessageSender') {
@@ -89,6 +109,12 @@ export class ConsoleTransport implements LogTransport {
       if (entry.message.includes('Rate limit updated with safety factor')) return undefined;
       if (entry.message.includes('Successfully initialized filters')) return undefined;
       if (entry.message.includes('System time validated')) return undefined;
+      // Add filtering for additional verbose messages
+      if (entry.message.includes('Processing search window')) return undefined;
+      if (entry.message.includes('Processing cycle complete')) return undefined;
+      if (entry.message.includes('Topic Configuration')) return undefined;
+      if (entry.message.includes('duplicate_check passed')) return undefined;
+      if (entry.message.includes('Rate limit calculation')) return undefined;
 
       if (entry.message.includes('Search window')) {
         const account = String(entry.data?.object?.account || '');
@@ -117,6 +143,27 @@ export class ConsoleTransport implements LogTransport {
         });
       }
     }
+    
+    // Special formatting for tweet search summary
+    if (entry.data && entry.message.includes('Found') && entry.message.includes('tweets in search') && entry.data.status === 'TWEETS_FOUND_SUMMARY') {
+      const searchId = entry.data?.searchId || '';
+      const ageDistribution = entry.data?.ageDistribution as Record<string, number> || {};
+      
+      // Format age distribution as a string
+      const ageDistStr = Object.entries(ageDistribution)
+        .sort(([a], [b]) => {
+          const getMinutes = (category: string) => parseInt(category.split('-')[0]) || 0;
+          return getMinutes(a) - getMinutes(b);
+        })
+        .map(([category, count]) => `${category}: ${count}`)
+        .join(', ');
+      
+      return this.formatter.formatLogComponents({
+        timestamp: String(timestamp),
+        component: String(component),
+        message: `${this.formatter.cyan('[SEARCH]')} ${entry.message} ${ageDistStr ? `(${ageDistStr})` : ''}`
+      });
+    }
 
     // Format error messages more concisely
     let errorInfo = '';
@@ -140,14 +187,33 @@ export class ConsoleTransport implements LogTransport {
     }
 
     // Format the base message
-    const logLevel = entry.level !== 2 ? 
-      ['ERROR', 'WARN', 'INFO', 'DEBUG'][entry.level] || 'INFO' : 
-      undefined;
+    const levelMap = ['ERROR', 'WARN', 'INFO', 'DEBUG'];
+    const logLevel = entry.level !== 2 ? levelMap[entry.level] || 'INFO' : undefined;
+    
+    // Add visual indicators based on message content
+    let messageWithIndicators = entry.message;
+    
+    // Add indentation for stage logs if they're part of a pipeline
+    if (entry.message.includes('[STAGE') && !entry.message.includes('[BATCH')) {
+      messageWithIndicators = `  ${messageWithIndicators}`;
+    }
+    
+    // Add colors to status indicators
+    messageWithIndicators = messageWithIndicators
+      .replace(/\[✓\]/g, this.formatter.green('[✓]'))
+      .replace(/\[✗\]/g, this.formatter.red('[✗]'))
+      .replace(/\[⏩\]/g, this.formatter.blue('[⏩]'))
+      .replace(/\[BATCH START\]/g, this.formatter.bold('[BATCH START]'))
+      .replace(/\[BATCH END\]/g, this.formatter.bold('[BATCH END]'))
+      .replace(/\[BATCH SUMMARY\]/g, this.formatter.bold('[BATCH SUMMARY]'))
+      .replace(/\[PIPELINE START\]/g, this.formatter.bold('[PIPELINE START]'))
+      .replace(/\[PIPELINE ✓\]/g, this.formatter.green('[PIPELINE ✓]'))
+      .replace(/\[PIPELINE ✗\]/g, this.formatter.red('[PIPELINE ✗]'));
 
     const baseMessage = this.formatter.formatLogComponents({
       timestamp: String(timestamp),
-      component: String(component),
-      message: entry.message,
+      component: component !== 'TweetProcessor' ? String(component) : '',
+      message: messageWithIndicators,
       level: logLevel
     });
 
@@ -238,7 +304,8 @@ export class FileTransport implements LogTransport {
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
     
-    let message = `[${timestamp}] [${level}] [${component}]${correlationId} ${entry.message}`;
+    // Skip component tag for TweetProcessor logs
+    let message = `[${timestamp}] [${level}]${component !== 'TweetProcessor' ? ` [${component}]` : ''}${correlationId} ${entry.message}`;
     
     if (entry.data && Object.keys(entry.data).length > 0) {
       message += ` ${JSON.stringify(entry.data)}`;

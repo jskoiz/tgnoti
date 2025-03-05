@@ -2,8 +2,8 @@ import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
 import { LogService } from '../../logging/LogService.js';
 import { Logger } from '../../types/logger.js';
-import { MetricsManager } from '../../core/monitoring/MetricsManager.js';
-import { ErrorHandler, ApiError } from '../../utils/ErrorHandler.js';
+import { MetricsManager } from '../monitoring/MetricsManager.js';
+import { ErrorHandler, ApiError, RateLimitError } from '../../utils/ErrorHandler.js';
 import { IErrorHandler } from '../../types/ErrorHandler.js';
 
 @injectable()
@@ -27,14 +27,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
   }
 
   handle(error: unknown): void {
-    // Only log essential error info at debug level
-    if (error instanceof Error) {
-      this.logService.debug(`RettiwtErrorHandler: ${error.name}`, { message: error.message });
-    }
-    
-    this.handleRettiwtError(error).catch(err => {
-      this.logService.error('Error handling Rettiwt error', err);
-    });
+    this.handleRettiwtError(error).catch(() => {}); // Suppress error handler errors
   }
 
   isInCooldown(): boolean {
@@ -63,8 +56,20 @@ export class RettiwtErrorHandler implements IErrorHandler {
 
   async handleRettiwtError(error: unknown): Promise<void> {
     const errorObj = error as { status?: number; code?: number; message?: string };
+    const retryAfterHeader = (error as any)?.response?.headers?.['retry-after'];
     const statusCode = errorObj?.status || errorObj?.code || 500;
     const message = errorObj?.message || String(error);
+
+    // Extract retry-after from headers if available
+    let retryAfter: number | undefined;
+    this.logService.debug('Processing retry-after header', {
+      retryAfterHeader,
+      headerType: typeof retryAfterHeader,
+      rawValue: retryAfterHeader
+    });
+    
+    if (typeof retryAfterHeader === 'string') retryAfter = parseInt(retryAfterHeader, 10) * 1000; // Convert to milliseconds
+    if (retryAfter) this.logService.debug('Parsed retry-after value', { retryAfter });
 
     // Check if we're still in cooldown
     if (this.isInCooldown()) {
@@ -86,8 +91,8 @@ export class RettiwtErrorHandler implements IErrorHandler {
         cooldownTime: Math.round((this.currentCooldownEnd - now)/1000) + 's',
         nextRetry: new Date(this.currentCooldownEnd).toLocaleTimeString()
       });
-      this.baseHandler.handleApiError(new ApiError(429, message), 'Rettiwt');
-      await this.handleRateLimit();
+      this.baseHandler.handleApiError(new RateLimitError(message, retryAfter), 'Rettiwt');
+      await this.handleRateLimit(retryAfter);
     } else if (this.isRetryableError(errorObj)) {
       if (this.retryCount < this.MAX_RETRIES) {
         const delay = this.calculateBackoff();
@@ -115,8 +120,8 @@ export class RettiwtErrorHandler implements IErrorHandler {
     }
     
     if (typeof error.message === 'string') {
-      return error.message.includes('TOO_MANY_REQUESTS') ||
-             error.message.includes('Rate limit');
+      const msg = error.message.toLowerCase();
+      return msg.includes('too_many_requests') || msg.includes('rate limit');
     }
     
     return false;
@@ -133,8 +138,15 @@ export class RettiwtErrorHandler implements IErrorHandler {
     return typeof code === 'number' && this.RETRYABLE_CODES.includes(code);
   }
 
-  private async handleRateLimit(): Promise<void> {
+  private async handleRateLimit(retryAfter?: number): Promise<void> {
     const now = Date.now();
+    
+    // Use retry-after if available
+    if (typeof retryAfter === 'number' && retryAfter > 0) {
+      this.logService.warn(`Rate limit cooldown: ${Math.ceil(retryAfter / 1000)} seconds (from API)`);
+      await this.delay(retryAfter);
+      return;
+    }
     
     // If we're already in cooldown, extend it
     if (this.inCooldown) {
@@ -159,8 +171,8 @@ export class RettiwtErrorHandler implements IErrorHandler {
     this.rateLimitHits++;
     this.lastRateLimitTime = now;
     
-    // Progressive cooldown: 2min -> 5min -> 10min -> 20min -> 30min
-    const baseCooldown = 2 * 60 * 1000; // 2 minutes
+    // Progressive cooldown: 4min -> 8min -> 16min -> 30min -> 30min
+    const baseCooldown = 4 * 60 * 1000; // 4 minutes
     const cooldownTime = Math.min(
       30 * 60 * 1000, // Max 30 minutes
       baseCooldown * Math.pow(2, Math.min(4, this.rateLimitHits - 1))
@@ -169,13 +181,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
     this.inCooldown = true;
     this.currentCooldownEnd = now + cooldownTime;
     
-    this.logService.warn('Rate limit reached, entering cooldown', {
-      rateLimitHits: this.rateLimitHits,
-      cooldownTime: Math.round(cooldownTime/1000) + 's',
-      cooldownEnd: new Date(this.currentCooldownEnd).toISOString(),
-      timeSinceLastRateLimit: Math.round(timeSinceLastRateLimit/1000) + 's'
-    });
-    
+    this.logService.warn(`Rate limit cooldown: ${Math.round(cooldownTime/1000)} seconds (progressive backoff)`);
     await this.delay(cooldownTime);
     
     // After cooldown completes

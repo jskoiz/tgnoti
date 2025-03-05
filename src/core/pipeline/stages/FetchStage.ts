@@ -7,6 +7,8 @@ import { PipelineStage, StageResult, TweetContext } from '../types/PipelineTypes
 import { MetricsManager } from '../../monitoring/MetricsManager.js';
 import { ErrorHandler } from '../../../utils/ErrorHandler.js';
 import { Tweet } from '../../../types/twitter.js';
+import { MONITORING_ACCOUNTS } from '../../../config/monitoring.js';
+import { getTopicById } from '../../../config/topicConfig.js';
 
 @injectable()
 export class FetchStage implements PipelineStage<TweetContext, TweetContext> {
@@ -25,117 +27,51 @@ export class FetchStage implements PipelineStage<TweetContext, TweetContext> {
    */
   async execute(context: TweetContext): Promise<StageResult<TweetContext>> {
     const startTime = Date.now();
-    this.logger.debug('Starting fetch stage', {
-      topicId: context.topicId,
-      tweetId: context.tweet.id
+    
+    // SIMPLIFIED APPROACH with improved logging
+    const tweetAge = Math.round((Date.now() - new Date(context.tweet.createdAt).getTime()) / (60 * 1000));
+    const hasMinimumData = this.hasMinimumRequiredData(context.tweet);
+    const hasCompleteData = this.hasCompleteData(context.tweet);
+    
+    this.logger.debug(`[FETCH] Tweet (@${context.tweet.tweetBy?.userName || 'unknown'}): Using original data`, {
+      dataStatus: hasCompleteData ? 'COMPLETE' : (hasMinimumData ? 'MINIMUM' : 'INSUFFICIENT')
     });
-
-    try {
-      // Get search window
-      const { startDate, endDate } = await this.searchConfig.createSearchWindow();
-      
-      // Validate tweet is within search window
-      const tweetDate = new Date(context.tweet.createdAt);
-      if (!this.isWithinSearchWindow(tweetDate, startDate, endDate)) {
-        return {
-          success: false,
-          data: context,
-          error: new Error('Tweet is outside search window'),
-          metadata: {
-            startDate: startDate.toISOString(),
-            endDate: endDate.toISOString(),
-            tweetDate: tweetDate.toISOString()
-          }
-        };
-      }
-
-      // Check if we already have complete tweet data
-      if (this.hasCompleteData(context.tweet)) {
-        return {
-          success: true,
-          data: {
-            ...context,
-            metadata: {
-              ...context.metadata,
-              fetch: {
-                fetchDurationMs: Date.now() - startTime,
-                skippedFetch: true,
-                searchWindow: undefined
-              }
-              
-            }
-          }
-        };
-      }
-
-      // Fetch additional tweet data
-      const tweets = await this.searchStrategy.search({
-        username: context.tweet.tweetBy.userName,
-        startDate: new Date(context.tweet.createdAt),
-        endDate: new Date(context.tweet.createdAt),
-        excludeRetweets: true,
-        excludeQuotes: false,
-        language: 'en'
-      });
-      
-      const enrichedTweet = tweets.find((t: Tweet) => t.id === context.tweet.id);
-      
-      if (!enrichedTweet) {
-        return {
-          success: false,
-          data: context,
-          error: new Error('Failed to fetch tweet details'),
-          metadata: {
-            tweetId: context.tweet.id
-          }
-        };
-      }
-
-      // Update context with enriched tweet data
-      const updatedContext: TweetContext = {
-        ...context,
-        tweet: enrichedTweet,
-        metadata: {
-          ...context.metadata,
-          fetch: {
-            fetchDurationMs: Date.now() - startTime,
-            skippedFetch: false,
-            searchWindow: {
-              startDate: startDate.toISOString(),
-              endDate: endDate.toISOString()
-            }
-          }
-        }
-      };
-
+    
+    // Check if we have enough data in the original tweet to proceed
+    if (hasMinimumData) {
       this.recordMetrics(startTime);
-
+      
       return {
         success: true,
-        data: updatedContext,
+        data: {
+          ...context,
+          metadata: {
+            ...context.metadata,
+            fetch: {
+              fetchDurationMs: Date.now() - startTime,
+              skippedFetch: true,
+              searchWindow: undefined
+            }
+          }
+        },
         metadata: {
           fetch: {
             fetchDurationMs: Date.now() - startTime,
-            skippedFetch: false,
+            skippedFetch: true,
             searchWindow: undefined
           }
         }
       };
-
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.errorHandler.handleError(err, 'Fetch stage');
+    } else {
+      const missingFields = this.getMissingFields(context.tweet);
+      this.logger.error(`[✗] Tweet (@${context.tweet.tweetBy?.userName || 'unknown'}): Insufficient data. Missing: ${missingFields.join(', ')}`);
       
       return {
         success: false,
         data: context,
-        error: err,
+        error: new Error(`Tweet has insufficient data: missing ${this.getMissingFields(context.tweet).join(', ')}`),
         metadata: {
-          fetch: {
-            fetchDurationMs: Date.now() - startTime,
-            skippedFetch: false,
-            searchWindow: undefined
-          }
+          tweetId: context.tweet.id
         }
       };
     }
@@ -161,6 +97,32 @@ export class FetchStage implements PipelineStage<TweetContext, TweetContext> {
       tweet.retweetCount !== undefined &&
       tweet.likeCount !== undefined
     );
+  }
+  
+  /**
+   * Check if we have minimum required tweet data to proceed
+   */
+  private hasMinimumRequiredData(tweet: Tweet): boolean {
+    return Boolean(
+      tweet && tweet.id &&
+      tweet.text && tweet.text.length > 0 &&
+      tweet.createdAt && 
+      tweet.tweetBy && tweet.tweetBy.userName
+    );
+  }
+
+  /**
+   * Get list of missing required fields
+   */
+  private getMissingFields(tweet: Tweet): string[] {
+    const missingFields = [];
+    
+    if (!tweet.id) missingFields.push('id');
+    if (!tweet.text || tweet.text.length === 0) missingFields.push('text');
+    if (!tweet.createdAt) missingFields.push('createdAt');
+    if (!tweet.tweetBy || !tweet.tweetBy.userName) missingFields.push('userName');
+    
+    return missingFields;
   }
 
   /**

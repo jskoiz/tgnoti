@@ -158,6 +158,7 @@ export interface AdvancedFilter {
 
 export interface SearchQueryConfig {
   type: 'structured';
+  searchId?: string;  // ID of the search operation for tracking
   keywords?: string[];
   accounts?: string[];
   mentions?: string[];
