@@ -8,6 +8,7 @@ import { Tweet } from '../types/twitter.js';
 import { TopicFilter } from '../types/topics.js';
 import { MonitorState, MetricsSnapshot } from '../types/monitoring-enhanced.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
+import { Config } from '../types/storage.js';
 
 @injectable()
 export class MongoDBService {
@@ -164,6 +165,11 @@ export class MongoDBService {
   private getMetricsSnapshotsCollection(): Collection<MetricsSnapshot> {
     if (!this.db) throw new Error('Database not initialized');
     return this.db.collection('metricsSnapshots');
+  }
+
+  private getConfigCollection(): Collection<any> {
+    if (!this.db) throw new Error('Database not initialized');
+    return this.db.collection('config');
   }
   
   // ===== Tweet methods =====
@@ -466,6 +472,54 @@ export class MongoDBService {
         .toArray();
     } catch (error) {
       this.logger.error('Failed to get historical metrics:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  // ===== Config methods =====
+  
+  async getConfig(): Promise<Config | null> {
+    try {
+      // If MongoDB is not initialized, return null
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot get config.');
+        return null;
+      }
+      
+      const collection = this.getConfigCollection();
+      const doc = await collection.findOne({ type: 'appConfig' });
+      
+      if (doc) {
+        const { _id, type, ...config } = doc;
+        return config as Config;
+      }
+      
+      return null;
+    } catch (error) {
+      this.logger.error('Failed to get config:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  async saveConfig(config: Config): Promise<void> {
+    try {
+      // If MongoDB is not initialized, log a warning and return
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot save config.');
+        return;
+      }
+      
+      const collection = this.getConfigCollection();
+      
+      await collection.updateOne(
+        { type: 'appConfig' },
+        { $set: { ...config, type: 'appConfig', updatedAt: new Date() } },
+        { upsert: true }
+      );
+      
+      this.logger.debug('Config saved successfully');
+    } catch (error) {
+      this.logger.error('Failed to save config:', error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }

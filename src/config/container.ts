@@ -3,7 +3,6 @@ import { TYPES } from '../types/di.js';
 import { TweetFormatter } from '../types/telegram.js';
 import { SearchConfig } from './searchConfig.js';
 import { Environment } from './environment.js';
-import { TweetTrackingConfig } from './tweetTracking.js';
 import { FileMessageStorage } from '../telegram/storage/messageStorage.js';
 import { MessageStorage } from '../telegram/types/messageStorage.js';
 import { CircuitBreakerConfig } from '../types/monitoring.js';
@@ -12,7 +11,7 @@ import { Logger } from '../types/logger.js';
 import { LogService } from '../logging/LogService.js';
 import { ConsoleLogger } from '../utils/logger.js';
 import { Storage } from '../core/storage/storage.js';
-import { DatabaseManager } from '../core/storage/DatabaseManager.js';
+import { ConfigStorage } from '../core/storage/ConfigStorage.js';
 import { ConfigManager } from './ConfigManager.js';
 import { ConfigService } from '../services/ConfigService.js';
 import { MongoDBManager } from '../core/storage/MongoDBManager.js';
@@ -56,8 +55,16 @@ import { LoggingConfig } from './loggingConfig.js';
 import { LoggerFactory } from '../logging/LoggerFactory.js';
 import { DefaultLogService } from '../logging/DefaultLogService.js';
 
+// Declare global container for DI
+declare global { 
+  var container: Container | undefined; 
+}
+
 export function createContainer(): Container {
   const container = new Container();
+  
+  // Make container globally available to avoid circular dependencies
+  global.container = container;
 
   // Set default scope to singleton
   container.options.defaultScope = "Singleton";
@@ -104,9 +111,9 @@ export function createContainer(): Container {
   
   container.bind<Environment>(TYPES.Environment).to(Environment).inSingletonScope();  
   container.bind<SearchConfig>(TYPES.SearchConfig).to(SearchConfig).inSingletonScope();
-  container.bind<TweetTrackingConfig>(TYPES.TweetTrackingConfig).to(TweetTrackingConfig).inSingletonScope();
   container.bind<Storage>(TYPES.Storage).to(Storage).inSingletonScope();
-  container.bind<DatabaseManager>(TYPES.DatabaseManager).to(DatabaseManager).inSingletonScope();
+  container.bind<ConfigStorage>(TYPES.ConfigStorage).to(ConfigStorage).inSingletonScope();
+  // DatabaseManager is removed as we're using MongoDB exclusively
   container.bind<MongoDBManager>(TYPES.MongoDBManager).to(MongoDBManager).inSingletonScope();
   container.bind<MessageStorage>(TYPES.MessageStorage).to(FileMessageStorage).inSingletonScope();
   container.bind<CircuitBreakerConfig>(TYPES.CircuitBreakerConfig).toConstantValue({
@@ -188,9 +195,6 @@ export function createContainer(): Container {
   const searchConfig = container.get<SearchConfig>(TYPES.SearchConfig);
   dateValidator.setSearchConfig(searchConfig);
   
-  // Initialize tweet tracking
-  container.get<TweetTrackingConfig>(TYPES.TweetTrackingConfig).initialize();
-
   return container;
 }
 
@@ -199,21 +203,16 @@ export async function initializeContainer(): Promise<Container> {
   
   // Initialize database
   try {
-    await Promise.all([
-      container.get<StorageService>(TYPES.StorageService).initialize()
-    ]).catch(error => {
-      if (error instanceof Error) {
-        console.error('Failed to initialize databases:', error.message);
-        if (error.stack) {
-          console.error(error.stack);
-        }
-      } else {
-        console.error('Failed to initialize databases:', error);
-      }
-      console.warn('Continuing in fallback mode without full database support. Some features may be limited.');
-    });
+    await container.get<StorageService>(TYPES.StorageService).initialize();
+    
+    // Initialize ConfigService after StorageService
+    await container.get<ConfigService>(TYPES.ConfigService).initialize();
   } catch (error) {
-    console.error('Unexpected error during initialization:', error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('Failed to initialize databases:', err.message);
+    if (err.stack) {
+      console.error(err.stack);
+    }
     console.warn('Continuing in fallback mode without full database support. Some features may be limited.');
   }
 

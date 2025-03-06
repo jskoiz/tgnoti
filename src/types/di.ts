@@ -8,6 +8,7 @@ const TYPES = {
   Storage: Symbol.for('Storage'),
   DatabaseManager: Symbol.for('DatabaseManager'),
   MongoDBManager: Symbol.for('MongoDBManager'),
+  ConfigStorage: Symbol.for('ConfigStorage'),
   MongoDBService: Symbol.for('MongoDBService'),
   StorageService: Symbol.for('StorageService'),
   TweetProcessor: Symbol.for('TweetProcessor'),

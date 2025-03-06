@@ -83,7 +83,7 @@ export class EnhancedCircuitBreaker {
     } catch (error) {
       // Check if it's a rate limit error
       const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
-      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429') || errorMessage.includes('too_many_requests')) {
         this.logger.warn(`Rate limit error detected for ${category}, not counting toward circuit breaker failures`);
         // Don't count rate limit errors toward circuit breaker failures
         throw error;

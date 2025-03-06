@@ -5,6 +5,7 @@ import { ConfigService } from './ConfigService.js';
 import { MongoDBService } from './MongoDBService.js';
 import { Tweet } from '../types/twitter.js';
 import { MonitorState, MetricsSnapshot } from '../types/monitoring-enhanced.js';
+import { Config } from '../types/storage.js';
 
 @injectable()
 export class StorageService {
@@ -25,6 +26,25 @@ export class StorageService {
       this.logger.warn('Continuing in fallback mode without MongoDB. Some features may be limited.');
     }
     this.logger.info('Storage service initialized');
+  }
+  
+  async getConfig(): Promise<Config | null> {
+    try {
+      return await this.mongoDb.getConfig();
+    } catch (error) {
+      this.logger.error('Failed to get configuration:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  async saveConfig(config: Config): Promise<void> {
+    try {
+      await this.mongoDb.saveConfig(config);
+      this.logger.debug('Configuration saved successfully');
+    } catch (error) {
+      this.logger.error('Failed to save configuration:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
   }
   
   async storeTweet(tweet: Tweet, topicId: string): Promise<void> {
