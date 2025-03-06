@@ -54,6 +54,7 @@ import { TelegramBotService } from '../telegram/bot/telegramBotService.js';
 import { LoggingConfig } from './loggingConfig.js';
 import { LoggerFactory } from '../logging/LoggerFactory.js';
 import { DefaultLogService } from '../logging/DefaultLogService.js';
+import { MongoDataValidator } from '../utils/mongoDataValidator.js';
 
 // Declare global container for DI
 declare global { 
@@ -129,6 +130,7 @@ export function createContainer(): Container {
   container.bind<EnhancedRateLimiter>(TYPES.EnhancedRateLimiter).to(EnhancedRateLimiter).inSingletonScope();
   container.bind<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor).to(EnhancedTweetMonitor).inSingletonScope();
   container.bind<MonitoringDashboard>(TYPES.MonitoringDashboard).to(MonitoringDashboard).inSingletonScope();
+  container.bind<MongoDataValidator>(TYPES.MongoDataValidator).to(MongoDataValidator).inSingletonScope();
   
   // Enhanced circuit breaker config
   container.bind<EnhancedCircuitBreakerConfig>(TYPES.EnhancedCircuitBreakerConfig).toConstantValue({

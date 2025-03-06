@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { Container } from 'inversify';
 import { createContainer } from '../src/config/container.js';
-import { DatabaseManager } from '../src/core/storage/DatabaseManager.js';
 import { MongoDBService } from '../src/services/MongoDBService.js';
 import { TYPES } from '../src/types/di.js';
 import { Logger } from '../src/types/logger.js';

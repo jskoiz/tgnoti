@@ -9,18 +9,22 @@ import { TopicFilter } from '../types/topics.js';
 import { MonitorState, MetricsSnapshot } from '../types/monitoring-enhanced.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { Config } from '../types/storage.js';
+import { MongoDataValidator } from '../utils/mongoDataValidator.js';
 
 @injectable()
 export class MongoDBService {
   private client: MongoClient | null = null;
   private db: Db | null = null;
+  private validator: MongoDataValidator;
   
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.ConfigService) private configService: ConfigService,
-    @inject(TYPES.MetricsManager) private metrics: MetricsManager
+    @inject(TYPES.MetricsManager) private metrics: MetricsManager,
+    @inject(TYPES.MongoDataValidator) private dataValidator: MongoDataValidator
   ) {
     this.logger.setComponent('MongoDBService');
+    this.validator = dataValidator;
   }
   
   async initialize(): Promise<void> {
@@ -104,31 +108,39 @@ export class MongoDBService {
       // Create indexes for tweets collection
       const tweetsCollection = this.getTweetsCollection();
       await tweetsCollection.createIndexes([
-        { key: { id: 1 }, unique: true },
-        { key: { 'metadata.topicId': 1 }, unique: false },
-        { key: { 'metadata.capturedAt': 1 }, unique: false },
-        { key: { 'processingStatus.isAnalyzed': 1 }, unique: false },
-        { key: { text: "text" }, unique: false }
+        { key: { id: 1 }, unique: true, name: 'idx_tweet_id' },
+        { key: { 'metadata.topicId': 1 }, unique: false, name: 'idx_topic_id' },
+        { key: { 'metadata.capturedAt': 1 }, unique: false, name: 'idx_captured_at' },
+        { key: { 'processingStatus.isAnalyzed': 1 }, unique: false, name: 'idx_is_analyzed' },
+        { key: { text: "text" }, unique: false, name: 'idx_text_search' },
+        // Optimized indexes for common queries
+        { key: { 'tweetBy.userName': 1 }, unique: false, name: 'idx_username' },
+        { key: { 'metadata.capturedAt': -1, id: -1 }, unique: false, name: 'idx_recent_tweets' },
+        { key: { 'processingStatus.isAnalyzed': 1, 'processingStatus.attempts': 1 }, unique: false, name: 'idx_processing_status' }
       ]);
       
       // Create indexes for topic filters collection
       const topicFiltersCollection = this.getTopicFiltersCollection();
       await topicFiltersCollection.createIndexes([
-        { key: { topicId: 1, filterType: 1, value: 1 }, unique: true },
-        { key: { topicId: 1 }, unique: false }
+        { key: { topicId: 1, filterType: 1, value: 1 }, unique: true, name: 'idx_unique_filter' },
+        { key: { topicId: 1 }, unique: false, name: 'idx_topic_filters' },
+        { key: { filterType: 1, value: 1 }, unique: false, name: 'idx_filter_lookup' }
       ]);
 
       // Create indexes for monitor state collection
       const monitorStateCollection = this.getMonitorStateCollection();
-      await monitorStateCollection.createIndex({ type: 1 }, { unique: true });
+      await monitorStateCollection.createIndex({ type: 1 }, { unique: true, name: 'idx_monitor_state_type' });
 
       // Create indexes for metrics snapshots collection
       const metricsSnapshotsCollection = this.getMetricsSnapshotsCollection();
       await metricsSnapshotsCollection.createIndexes([
-        { key: { timestamp: 1 }, unique: false },
-        { key: { timestamp: -1 }, unique: false }
+        { key: { timestamp: 1 }, unique: false, name: 'idx_metrics_timestamp_asc' },
+        { key: { timestamp: -1 }, unique: false, name: 'idx_metrics_timestamp_desc' }
       ]);
 
+      // Create index for config collection
+      const configCollection = this.getConfigCollection();
+      await configCollection.createIndex({ type: 1 }, { unique: true, name: 'idx_config_type' });
       
       this.logger.info('MongoDB indexes created successfully');
     } catch (error) {
@@ -186,8 +198,6 @@ export class MongoDBService {
     }
     
     try {
-      const collection = this.getTweetsCollection();
-      
       const doc: TweetDocument = {
         ...tweet,
         metadata: {
@@ -201,6 +211,18 @@ export class MongoDBService {
           attempts: 0
         }
       };
+
+      // Validate the tweet document
+      const validation = this.validator.validateTweet(doc);
+      if (!validation.isValid) {
+        this.logger.warn(`Tweet ${tweet.id} failed validation: ${validation.errors.join(', ')}`);
+        this.logger.debug('Invalid tweet:', doc);
+        this.metrics.increment('mongodb.tweets.validation_failures');
+        const errorMessage = `Tweet validation failed: ${validation.errors.join(', ')}`;
+        throw new Error(errorMessage);
+      }
+      
+      const collection = this.getTweetsCollection();
       
       await collection.updateOne(
         { id: tweet.id },
@@ -340,6 +362,25 @@ export class MongoDBService {
         this.logger.warn(`MongoDB not initialized. Cannot add filter to topic ${topicId}.`);
         return;
       }
+
+      // Create filter document
+      const filterDoc: TopicFilterDocument = {
+        topicId,
+        filterType: filter.type,
+        value: filter.value,
+        createdAt: new Date(),
+        createdBy: userId
+      };
+
+      // Validate the filter document
+      const validation = this.validator.validateTopicFilter(filterDoc);
+      if (!validation.isValid) {
+        this.logger.warn(`Filter for topic ${topicId} failed validation: ${validation.errors.join(', ')}`);
+        this.logger.debug('Invalid filter:', filterDoc);
+        this.metrics.increment('mongodb.filters.validation_failures');
+        const errorMessage = `Filter validation failed: ${validation.errors.join(', ')}`;
+        throw new Error(errorMessage);
+      }
       
       const collection = this.getTopicFiltersCollection();
       
@@ -412,6 +453,16 @@ export class MongoDBService {
   
   async saveMonitorState(state: MonitorState): Promise<void> {
     try {
+      // Validate the monitor state
+      const validation = this.validator.validateMonitorState(state);
+      if (!validation.isValid) {
+        this.logger.warn(`Monitor state failed validation: ${validation.errors.join(', ')}`);
+        this.logger.debug('Invalid state:', state);
+        this.metrics.increment('mongodb.state.validation_failures');
+        const errorMessage = `Monitor state validation failed: ${validation.errors.join(', ')}`;
+        throw new Error(errorMessage);
+      }
+
       const collection = this.getMonitorStateCollection();
       
       await collection.updateOne(
@@ -431,6 +482,16 @@ export class MongoDBService {
   
   async saveMetricsSnapshot(snapshot: MetricsSnapshot): Promise<void> {
     try {
+      // Validate the metrics snapshot
+      const validation = this.validator.validateMetricsSnapshot(snapshot);
+      if (!validation.isValid) {
+        this.logger.warn(`Metrics snapshot failed validation: ${validation.errors.join(', ')}`);
+        this.logger.debug('Invalid snapshot:', snapshot);
+        this.metrics.increment('mongodb.metrics.validation_failures');
+        const errorMessage = `Metrics snapshot validation failed: ${validation.errors.join(', ')}`;
+        throw new Error(errorMessage);
+      }
+
       const collection = this.getMetricsSnapshotsCollection();
       
       await collection.insertOne({
@@ -508,6 +569,11 @@ export class MongoDBService {
         this.logger.warn('MongoDB not initialized. Cannot save config.');
         return;
       }
+
+      // Basic validation for config
+      if (!config) {
+        throw new Error('Config object is required');
+      }
       
       const collection = this.getConfigCollection();
       
@@ -533,6 +599,12 @@ export class MongoDBService {
         this.logger.warn('MongoDB not initialized. Cleanup skipped.');
         return;
       }
+
+      // Validate maxAgeDays
+      if (maxAgeDays <= 0) {
+        this.logger.warn(`Invalid maxAgeDays value: ${maxAgeDays}, using default of 7`);
+        maxAgeDays = 7;
+      }
       
       const collection = this.getTweetsCollection();
       const cutoffDate = new Date();
@@ -549,6 +621,30 @@ export class MongoDBService {
       this.metrics.increment('storage.cleanup_failures');
       this.logger.error('Failed to cleanup old tweets:', error instanceof Error ? error : new Error(String(error)));
       throw error;
+    }
+  }
+
+  /**
+   * Performs data integrity checks on the MongoDB collections
+   * @returns An object containing check results and any issues found
+   */
+  async checkDataIntegrity(): Promise<{ isValid: boolean; issues: string[] }> {
+    try {
+      // If MongoDB is not initialized, log a warning and return
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Data integrity check skipped.');
+        return { isValid: true, issues: ['MongoDB not initialized, check skipped'] };
+      }
+
+      const config = this.configService.getMongoDBConfig();
+      return await this.validator.checkDataIntegrity(this.db, config.collections);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Failed to check data integrity:', err);
+      return { 
+        isValid: false, 
+        issues: [`Error during integrity check: ${err.message}`] 
+      };
     }
   }
   

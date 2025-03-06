@@ -6,7 +6,6 @@ const TYPES = {
   ConfigService: Symbol.for('ConfigService'),
   ConfigManager: Symbol.for('ConfigManager'),
   Storage: Symbol.for('Storage'),
-  DatabaseManager: Symbol.for('DatabaseManager'),
   MongoDBManager: Symbol.for('MongoDBManager'),
   ConfigStorage: Symbol.for('ConfigStorage'),
   MongoDBService: Symbol.for('MongoDBService'),
@@ -52,13 +51,13 @@ const TYPES = {
   LoggingConfig: Symbol.for('LoggingConfig'),
   Environment: Symbol.for('Environment'),
   SearchConfig: Symbol.for('SearchConfig'),
-  TweetTrackingConfig: Symbol.for('TweetTrackingConfig'),
   TelegramConfig: Symbol.for('TelegramConfig'),
   TelegramQueueConfig: Symbol.for('TelegramQueueConfig'),
   BasePath: Symbol.for('BasePath'),
   DateValidator: Symbol.for('DateValidator'),
   TweetFormatter: Symbol.for('TweetFormatter'),
   MessageValidator: Symbol.for('MessageValidator'),
+  MongoDataValidator: Symbol.for('MongoDataValidator'),
   TwitterNotifier: Symbol.for('TwitterNotifier'),
 };
 
