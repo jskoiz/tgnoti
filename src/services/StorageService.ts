@@ -20,12 +20,13 @@ export class StorageService {
   async initialize(): Promise<void> {
     try {
       await this.mongoDb.initialize();
+      this.logger.info('Storage service initialized');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error('Failed to initialize MongoDB service:', err);
-      this.logger.warn('Continuing in fallback mode without MongoDB. Some features may be limited.');
+      this.logger.error('Failed to initialize MongoDB service. Application cannot continue without database connection:', err);
+      // Rethrow the error to stop the application
+      throw err;
     }
-    this.logger.info('Storage service initialized');
   }
   
   async getConfig(): Promise<Config | null> {

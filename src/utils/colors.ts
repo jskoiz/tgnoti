@@ -109,6 +109,14 @@ export class ColorFormatter {
   }
 
   /**
+   * Format text as a cycle completion marker with bright cyan and bold
+   * Used to make search cycle completion messages stand out in logs
+   */
+  cycleComplete(text: string): string {
+    return this.wrap(`${Colors.brightCyan}${Colors.bold}`, text);
+  }
+
+  /**
    * Format log components with consistent colors
    */
   formatLogComponents(components: {

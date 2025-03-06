@@ -9,7 +9,8 @@ import { StorageService } from './StorageService.js';
 import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManager.js';
 import { EnhancedCircuitBreaker } from '../utils/enhancedCircuitBreaker.js';
 import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
-import { MonitorState, AccountBatch, HealthStatus, CircuitBreakerState, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
+import { RettiwtErrorHandler } from '../core/twitter/RettiwtErrorHandler.js';
+import { MonitorState, AccountBatch, HealthStatus, CircuitBreakerState, CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 // import { TopicConfig as MonitoringTopicConfig } from '../types/monitoring.js';
 
 @injectable()
@@ -28,7 +29,8 @@ export class EnhancedTweetMonitor {
     @inject(TYPES.TwitterService) private twitter: TwitterService,
     @inject(TYPES.TweetProcessor) private processor: TweetProcessor,
     @inject(TYPES.EnhancedMetricsManager) private metrics: EnhancedMetricsManager,
-    @inject(TYPES.StorageService) private storage: StorageService,
+    @inject(TYPES.StorageService) private storage: StorageService, 
+    @inject(TYPES.RettiwtErrorHandler) private rettiwtErrorHandler: RettiwtErrorHandler,
     @inject(TYPES.EnhancedRateLimiter) private rateLimiter: EnhancedRateLimiter
   ) {
     this.logger.setComponent('EnhancedTweetMonitor');
@@ -250,6 +252,19 @@ export class EnhancedTweetMonitor {
       
       // Process each topic
       for (const topic of topics) {
+        // Check if we're in a global cooldown period from RettiwtErrorHandler
+        if (this.rettiwtErrorHandler.isInCooldown()) {
+          const remainingCooldown = Math.ceil(this.rettiwtErrorHandler.getRemainingCooldown() / 1000);
+          this.logger.warn(`[RATE LIMIT PROTECTION] Skipping topic ${topic.name} (ID: ${topic.id}) due to global rate limit cooldown (${remainingCooldown}s remaining)`);
+          this.metrics.incrementForTopic(`${topic.id}`, 'rate_limit_skips', 1);
+          
+          // If we're in cooldown, pause processing for a short time before checking the next topic
+          // This prevents rapid checking of all topics when we know we're in cooldown
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          continue;
+        }
+        
         try {
           // Add delay between topics to respect rate limits
           await this.rateLimiter.acquireRateLimit('topic', `${topic.id}`);
@@ -366,6 +381,17 @@ export class EnhancedTweetMonitor {
     const searchType = topic.name === 'COMPETITOR_MENTIONS' ? 'mention' : 'from';
     
     for (const account of accounts) {
+      // Check if we're in a global cooldown period before processing each account
+      if (this.rettiwtErrorHandler.isInCooldown()) {
+        const remainingCooldown = Math.ceil(this.rettiwtErrorHandler.getRemainingCooldown() / 1000);
+        this.logger.warn(`[RATE LIMIT PROTECTION] Skipping account ${account} due to global rate limit cooldown (${remainingCooldown}s remaining)`);
+        this.metrics.incrementForAccount(account, 'rate_limit_skips', 1);
+        
+        // Skip to the next account if we're in cooldown
+        // We don't need to process any more accounts if we're in cooldown
+        continue;
+      }
+      
       try {
         // Add delay between accounts to respect rate limits
         await this.rateLimiter.acquireRateLimit('twitter', account);

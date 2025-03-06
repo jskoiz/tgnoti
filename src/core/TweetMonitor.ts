@@ -90,12 +90,14 @@ export class TweetMonitor {
       
       this.logger.info(`Search cycle: ${cycleStartTime.toISOString()} to ${cycleEndTime.toISOString()}`);
 
-      const tweets = await this.getTweets(cycleStartTime, cycleEndTime);
+      const { tweets, processedTopicCount } = await this.getTweets(cycleStartTime, cycleEndTime);
       this.lastPollTime = new Date();
       
-      this.logger.info(`Search cycle complete: ${tweets.length} tweets found`, {
-        window: `${Math.round((cycleEndTime.getTime() - cycleStartTime.getTime()) / 60000)}m`,
-        timestamp: new Date().toISOString()
+      // Add [CYCLE COMPLETE] marker for enhanced visibility in logs
+      this.logger.info(`[CYCLE COMPLETE] Search cycle finished: ${tweets.length} tweets found across ${processedTopicCount} topics`, {
+        window: `${Math.round((cycleEndTime.getTime() - cycleStartTime.getTime()) / 60000)}m`, 
+        timestamp: new Date().toISOString(),
+        status: 'CYCLE_COMPLETE'
       });
 
     } catch (error) {
@@ -106,7 +108,7 @@ export class TweetMonitor {
     }
   }
 
-  private async getTweets(searchStartTime: Date, searchEndTime: Date): Promise<Tweet[]> {
+  private async getTweets(searchStartTime: Date, searchEndTime: Date): Promise<{ tweets: Tweet[], processedTopicCount: number }> {
     const allTweets: Tweet[] = [];
     const seenTweetIds = new Set<string>();
     let duplicateCount = { total: 0, byTopic: 0 };
@@ -213,7 +215,10 @@ export class TweetMonitor {
       throw error;
     }
 
-    return allTweets;
+    return {
+      tweets: allTweets,
+      processedTopicCount: processedTopics.size
+    };
   }
 
   async stop(): Promise<void> {

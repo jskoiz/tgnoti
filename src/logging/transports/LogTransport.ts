@@ -81,6 +81,20 @@ export class ConsoleTransport implements LogTransport {
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
     
+    // Special formatting for cycle completion messages
+    if (entry.message.includes('[CYCLE COMPLETE]')) {
+      // Extract the message part after the marker
+      const markerIndex = entry.message.indexOf('[CYCLE COMPLETE]');
+      const marker = entry.message.substring(markerIndex, markerIndex + 16); // '[CYCLE COMPLETE]'
+      const baseMessage = entry.message.replace('[CYCLE COMPLETE]', '').trim();
+      
+      return this.formatter.formatLogComponents({
+        timestamp: String(timestamp),
+        component: String(component),
+        message: `${this.formatter.cycleComplete(marker)} ${baseMessage}`
+      });
+    }
+    
     // Filter out specific messages from TweetProcessor
     if (component === 'TweetProcessor') {
       if (entry.message.includes('Processing search window')) return undefined;

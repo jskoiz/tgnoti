@@ -2,7 +2,7 @@ import { MetricsManager } from './MetricsManager.js';
 import { Logger } from '../../types/logger.js';
 import { MonitoringType, TopicState, ProcessedTweet } from '../../types/monitoring.js';
 import { TelegramQueueMetrics } from '../../types/telegram.js';
-import { CircuitBreakerConfig } from '../../types/monitoring.js';
+import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../../types/monitoring-enhanced.js';
 import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
 import { ColorFormatter } from '../../utils/colors.js';
@@ -333,7 +333,7 @@ export class MonitoringDashboard {
   public updateCircuitBreakerStatus(
     status: 'CLOSED' | 'OPEN' | 'HALF_OPEN',
     failureCount: number,
-    config: CircuitBreakerConfig
+    config: EnhancedCircuitBreakerConfig
   ): void {
     this.systemMetrics.circuitBreaker = {
       status,

@@ -1,7 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../../types/logger.js';
 import { TYPES } from '../../types/di.js';
-import { CircuitBreaker } from '../../utils/circuitBreaker.js';
+import { EnhancedCircuitBreaker } from '../../utils/enhancedCircuitBreaker.js';
 import { MetricsManager } from '../../core/monitoring/MetricsManager.js';
 import {
   QueuedMessage,
@@ -27,7 +27,7 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
+    @inject(TYPES.CircuitBreaker) private circuitBreaker: EnhancedCircuitBreaker,
     @inject(TYPES.TelegramQueueConfig) private config: TelegramQueueConfig,
     @inject(TYPES.TelegramMessageSender) private sender: ITelegramMessageSender,
     @inject(TYPES.Storage) private storage: Storage

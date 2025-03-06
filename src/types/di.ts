@@ -18,7 +18,6 @@ const TYPES = {
   CircuitBreaker: Symbol.for('CircuitBreaker'),
   RettiwtErrorHandler: Symbol.for('RettiwtErrorHandler'),
   CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
-  EnhancedCircuitBreakerConfig: Symbol.for('EnhancedCircuitBreakerConfig'),
   UsernameHandler: Symbol.for('UsernameHandler'),
   MetricsManager: Symbol.for('MetricsManager'),
   EnhancedMetricsManager: Symbol.for('EnhancedMetricsManager'),

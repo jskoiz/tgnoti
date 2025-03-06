@@ -2,7 +2,7 @@ import TelegramBotApi from 'node-telegram-bot-api';
 import { injectable, inject } from 'inversify';
 import { Logger } from '../../types/logger.js';
 import { FormattedMessage, TelegramBotConfig, TelegramMessage, TweetMessageConfig, TweetFormatter, ITelegramMessageQueue, QueuedMessage, ITelegramMessageSender, TweetMetadata } from '../../types/telegram.js';
-import { CircuitBreaker } from '../../utils/circuitBreaker.js';
+import { EnhancedCircuitBreaker } from '../../utils/enhancedCircuitBreaker.js';
 import { TwitterClient } from '../../core/twitter/twitterClient.js';
 import { TYPES } from '../../types/di.js';
 import { Environment } from '../../config/environment.js';
@@ -24,7 +24,7 @@ export class TelegramBot {
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.TwitterClient) private twitterClient: TwitterClient,
     @inject('TelegramBotApi') private telegramBot: TelegramBotApi,
-    @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
+    @inject(TYPES.CircuitBreaker) private circuitBreaker: EnhancedCircuitBreaker,
     @inject(TYPES.Environment) private environment: Environment,
     @inject(TYPES.TopicManager) private topicManager: TopicManager,
     @inject(TYPES.MessageStorage) private messageStorage: MessageStorage,

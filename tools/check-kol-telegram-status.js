@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { MongoClient } from 'mongodb';
-import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -17,34 +16,33 @@ const envPath = `${basePath}/.env`;
 console.log('Loading environment variables from:', envPath);
 dotenv.config({ path: envPath });
 
-async function checkSQLiteTracking(tweetIds) {
-  return new Promise((resolve, reject) => {
-    console.log('Checking SQLite tweet tracking database...');
-    const dbPath = path.join(basePath, 'affiliate_data.db');
-    const db = new sqlite3.Database(dbPath);
+async function checkMongoDBTracking(tweetIds, client) {
+  console.log('Checking MongoDB for tweet tracking status...');
+  
+  try {
+    const db = client.db('twitter_notifications');
     
-    // Create placeholders for the query
-    const placeholders = tweetIds.map(() => '?').join(',');
-    const query = `SELECT tweet_id, topic_id FROM tracked_tweets WHERE tweet_id IN (${placeholders})`;
+    // We'll check for tweets with different topic IDs to see if they've been sent to other topics
+    const trackedTweets = await db.collection('tweets')
+      .find({
+        id: { $in: tweetIds },
+        'metadata.topicId': { $ne: '6531' } // Looking for tweets sent to other topics
+      })
+      .toArray();
     
-    db.all(query, tweetIds, (err, rows) => {
-      if (err) {
-        console.error('Error querying tracked_tweets table:', err);
-        db.close();
-        reject(err);
-        return;
+    // Create a map of tracked tweets for easy lookup
+    const trackedTweetsMap = {};
+    trackedTweets.forEach(tweet => {
+      // If this tweet exists with a different topic ID, it was likely sent to Telegram
+      if (!trackedTweetsMap[tweet.id]) {
+        trackedTweetsMap[tweet.id] = tweet.metadata.topicId;
       }
-      
-      db.close((closeErr) => {
-        if (closeErr) {
-          console.error('Error closing SQLite database:', closeErr);
-          reject(closeErr);
-          return;
-        }
-        resolve(rows);
-      });
     });
-  });
+    
+    return trackedTweetsMap;
+  } catch (error) {
+    throw error;
+  }
 }
 
 async function checkKolTelegramStatus() {
@@ -82,22 +80,15 @@ async function checkKolTelegramStatus() {
     // Extract tweet IDs
     const tweetIds = recentKolTweets.map(tweet => tweet.id);
     
-    // Check if these tweets are marked as seen in SQLite
-    const trackedTweets = await checkSQLiteTracking(tweetIds);
+    // Check if these tweets are marked as seen in other MongoDB collections/topics
+    const trackedTweetsMap = await checkMongoDBTracking(tweetIds, client);
     
-    console.log(`Found ${trackedTweets.length} of these tweets in SQLite tracking database.`);
-    
-    // Create a map of tracked tweets for easy lookup
-    const trackedTweetsMap = {};
-    trackedTweets.forEach(row => {
-      trackedTweetsMap[row.tweet_id] = row.topic_id;
-    });
-    
+    console.log(`Found ${Object.keys(trackedTweetsMap).length} of these tweets sent to other topics.`);
     // Display status for each tweet
     console.log('\nTweet status:');
     recentKolTweets.forEach(tweet => {
-      const isSentToTelegram = trackedTweetsMap[tweet.id] !== undefined;
-      const telegramTopic = trackedTweetsMap[tweet.id] || 'N/A';
+      const isSentToTelegram = tweet.metadata.sentToTelegram || trackedTweetsMap[tweet.id] !== undefined;
+      const telegramTopic = trackedTweetsMap[tweet.id] || tweet.metadata.topicId || 'N/A';
       
       console.log(`- Tweet ID: ${tweet.id}`);
       console.log(`  From: @${tweet.tweetBy?.userName}`);

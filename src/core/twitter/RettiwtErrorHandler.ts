@@ -40,7 +40,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
     }
     
     const remainingCooldown = Math.ceil((this.currentCooldownEnd - now) / 1000);
-    this.logService.debug('Cooldown status check', {
+    this.logService.debug('[RATE LIMIT STATUS] Cooldown active', {
       inCooldown: true,
       remainingSeconds: remainingCooldown,
       cooldownEnd: new Date(this.currentCooldownEnd).toISOString()
@@ -74,7 +74,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
     // Check if we're still in cooldown
     if (this.isInCooldown()) {
       const remainingCooldown = Math.ceil((this.currentCooldownEnd - Date.now()) / 1000);
-      this.logService.debug('Still in cooldown period', {
+      this.logService.warn('[RATE LIMIT ACTIVE] Still in cooldown period', {
         remainingSeconds: remainingCooldown,
         rateLimitHits: this.rateLimitHits
       });
@@ -143,7 +143,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
     
     // Use retry-after if available
     if (typeof retryAfter === 'number' && retryAfter > 0) {
-      this.logService.warn(`Rate limit cooldown: ${Math.ceil(retryAfter / 1000)} seconds (from API)`);
+      this.logService.warn(`[RATE LIMIT COOLDOWN] API-specified cooldown: ${Math.ceil(retryAfter / 1000)} seconds`);
       await this.delay(retryAfter);
       return;
     }
@@ -153,7 +153,7 @@ export class RettiwtErrorHandler implements IErrorHandler {
       const extendedCooldown = Math.min(30 * 60 * 1000, (this.currentCooldownEnd - now) * 1.5);
       this.currentCooldownEnd = now + extendedCooldown;
       
-      this.logService.warn('Extended existing cooldown', {
+      this.logService.warn('[RATE LIMIT EXTENDED] Extended existing cooldown', {
         newCooldownEnd: new Date(this.currentCooldownEnd).toISOString(),
         extendedBy: Math.round(extendedCooldown/1000) + 's'
       });
@@ -181,12 +181,12 @@ export class RettiwtErrorHandler implements IErrorHandler {
     this.inCooldown = true;
     this.currentCooldownEnd = now + cooldownTime;
     
-    this.logService.warn(`Rate limit cooldown: ${Math.round(cooldownTime/1000)} seconds (progressive backoff)`);
+    this.logService.warn(`[RATE LIMIT COOLDOWN] Progressive backoff: ${Math.round(cooldownTime/1000)} seconds (hit #${this.rateLimitHits})`);
     await this.delay(cooldownTime);
     
     // After cooldown completes
     this.inCooldown = false;
-    this.logService.info('Cooldown period complete', {
+    this.logService.info('[RATE LIMIT COMPLETE] Cooldown period complete', {
       rateLimitHits: this.rateLimitHits,
       totalCooldownTime: Math.round((Date.now() - now)/1000) + 's'
     });

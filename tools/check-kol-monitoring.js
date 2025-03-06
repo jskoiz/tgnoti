@@ -6,7 +6,6 @@ import { dirname } from 'path';
 import * as dotenv from 'dotenv';
 import fs from 'fs/promises';
 import { MongoClient } from 'mongodb';
-import sqlite3 from 'sqlite3';
 
 // Get directory path for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -18,30 +17,36 @@ const envPath = `${basePath}/.env`;
 console.log('Loading environment variables from:', envPath);
 dotenv.config({ path: envPath });
 
-async function checkSQLiteTopicFilters() {
-  return new Promise((resolve, reject) => {
-    console.log('Checking SQLite topic filters...');
-    const dbPath = path.join(basePath, 'affiliate_data.db');
-    const db = new sqlite3.Database(dbPath);
+async function checkMongoDBTopicFilters() {
+  console.log('Checking MongoDB topic filters...');
+  
+  const mongoUri = process.env.MONGODB_URI;
+  if (!mongoUri) {
+    console.error('MONGODB_URI environment variable not set');
+    return [];
+  }
+  
+  const client = new MongoClient(mongoUri);
+  
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB');
     
-    db.all('SELECT * FROM topic_filters WHERE topic_id = 6531', (err, rows) => {
-      if (err) {
-        console.error('Error querying topic_filters table:', err);
-        db.close();
-        reject(err);
-        return;
-      }
-      
-      db.close((closeErr) => {
-        if (closeErr) {
-          console.error('Error closing SQLite database:', closeErr);
-          reject(closeErr);
-          return;
-        }
-        resolve(rows);
-      });
-    });
-  });
+    const db = client.db();
+    const topicFiltersCollection = db.collection('topicFilters');
+    
+    // Query for topic filters with topicId 6531
+    const filters = await topicFiltersCollection.find({ topicId: 6531 }).toArray();
+    
+    return filters;
+    
+  } catch (error) {
+    console.error('Error querying MongoDB topic filters:', error);
+    throw error;
+  } finally {
+    await client.close();
+    console.log('MongoDB connection closed');
+  }
 }
 
 async function checkKolMonitoring() {
@@ -85,10 +90,10 @@ async function checkKolMonitoring() {
     console.error('Error reading config.json:', error);
   }
   
-  // Check SQLite topic filters
+  // Check MongoDB topic filters
   try {
-    const topicFilters = await checkSQLiteTopicFilters();
-    console.log(`\nSQLite topic filters for KOL_MONITORING (6531): ${topicFilters.length}`);
+    const topicFilters = await checkMongoDBTopicFilters();
+    console.log(`\nMongoDB topic filters for KOL_MONITORING (6531): ${topicFilters.length}`);
     
     if (topicFilters.length > 0) {
       console.log('Filter types:');
@@ -104,11 +109,11 @@ async function checkKolMonitoring() {
       // Show a sample of filters
       console.log('\nSample filters:');
       topicFilters.slice(0, 5).forEach(filter => {
-        console.log(`- ${filter.filter_type}: ${filter.value}`);
+        console.log(`- ${filter.filterType}: ${filter.value}`);
       });
     }
   } catch (error) {
-    console.error('Error checking SQLite topic filters:', error);
+    console.error('Error checking MongoDB topic filters:', error);
   }
   
   // Check src/config files

@@ -1,7 +1,6 @@
 #!/usr/bin/env ts-node-esm
 
 import { MongoClient } from 'mongodb';
-import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -16,32 +15,6 @@ const basePath = dirname(__dirname);
 const envPath = `${basePath}/.env`;
 console.log('Loading environment variables from:', envPath);
 dotenv.config({ path: envPath });
-
-async function resetSQLiteTracking() {
-  return new Promise<void>((resolve, reject) => {
-    console.log('Resetting SQLite tweet tracking database...');
-    const dbPath = path.join(basePath, 'affiliate_data.db');
-    const db = new sqlite3.Database(dbPath);
-    
-    db.run('DELETE FROM tracked_tweets', function(err) {
-      if (err) {
-        console.error('Error clearing tracked_tweets table:', err);
-        reject(err);
-        return;
-      }
-      
-      console.log(`Deleted ${this.changes} rows from tracked_tweets table`);
-      db.close((closeErr) => {
-        if (closeErr) {
-          console.error('Error closing SQLite database:', closeErr);
-          reject(closeErr);
-          return;
-        }
-        resolve();
-      });
-    });
-  });
-}
 
 async function resetMongoDBTracking() {
   console.log('Resetting MongoDB tweet tracking...');
@@ -75,8 +48,7 @@ async function resetMongoDBTracking() {
 
 async function main() {
   try {
-    // Reset both databases
-    await resetSQLiteTracking();
+    // Reset MongoDB tracking
     await resetMongoDBTracking();
     
     console.log('Tweet tracking reset complete. All tweets will now be treated as new.');

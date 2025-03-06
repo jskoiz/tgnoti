@@ -152,19 +152,25 @@ export class MongoDataValidator {
     const startTime = Date.now();
 
     // Check required fields
-    if (!state.lastPollTime) {
-      errors.push('Missing required field: lastPollTime');
+    if (!state.lastPollTimes) {
+      errors.push('Missing required field: lastPollTimes');
     }
-    if (!state.accountStates) {
-      errors.push('Missing required field: accountStates');
+    if (state.circuitBreakerStates && typeof state.circuitBreakerStates !== 'object') {
+      errors.push('circuitBreakerStates must be an object');
     }
 
     // Validate data types
-    if (state.lastPollTime && !(state.lastPollTime instanceof Date) && typeof state.lastPollTime !== 'number') {
-      errors.push('lastPollTime must be a Date or timestamp number');
+    if (state.lastPollTimes && typeof state.lastPollTimes !== 'object') {
+      errors.push('lastPollTimes must be an object mapping topic IDs to timestamps');
     }
-    if (state.accountStates && typeof state.accountStates !== 'object') {
-      errors.push('accountStates must be an object');
+    
+    // Check that lastPollTimes values are valid date strings
+    if (state.lastPollTimes && typeof state.lastPollTimes === 'object') {
+      for (const [topicId, timestamp] of Object.entries(state.lastPollTimes)) {
+        if (typeof timestamp !== 'string' || isNaN(Date.parse(timestamp as string))) {
+          errors.push(`Invalid timestamp for topic ${topicId}: ${timestamp}`);
+        }
+      }
     }
 
     // Record validation metrics

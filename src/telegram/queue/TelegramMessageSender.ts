@@ -1,7 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { Logger } from '../../types/logger.js';
 import { TYPES } from '../../types/di.js';
-import { CircuitBreaker } from '../../utils/circuitBreaker.js';
+import { EnhancedCircuitBreaker } from '../../utils/enhancedCircuitBreaker.js';
 import { SendMessageResult, TelegramError, ITelegramMessageSender, TweetMetadata } from '../../types/telegram.js';
 import { LogLevel } from '../../logging/LogService.js';
 import { getTopicById, TOPIC_CONFIG } from '../../config/topicConfig.js';
@@ -14,7 +14,7 @@ export class TelegramMessageSender implements ITelegramMessageSender {
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.CircuitBreaker) private circuitBreaker: CircuitBreaker,
+    @inject(TYPES.CircuitBreaker) private circuitBreaker: EnhancedCircuitBreaker,
     @inject('TelegramBotApi') private bot: TelegramBot
   ) {
     this.logger.setComponent('TelegramMessageSender');

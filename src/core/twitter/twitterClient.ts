@@ -167,11 +167,12 @@ export class TwitterClient {
     // Check if we're in cooldown before attempting search
     if (this.errorHandler.isInCooldown()) {
       const remainingCooldown = this.errorHandler.getRemainingCooldown();
-      this.logger.debug('Search attempted during cooldown', {
+      this.logger.warn('[RATE LIMIT BLOCKED] Search attempted during active cooldown period', undefined, {
         remainingMs: remainingCooldown,
-        remainingSeconds: Math.ceil(remainingCooldown / 1000)
+        remainingSeconds: Math.ceil(remainingCooldown / 1000),
+        searchParams: { accounts: params.fromUsers, mentions: params.mentions }
       });
-      await this.delay(5000); // Short delay before throwing
+      await this.delay(2000); // Short delay before throwing
       throw new Error('TOO_MANY_REQUESTS');
     }
 

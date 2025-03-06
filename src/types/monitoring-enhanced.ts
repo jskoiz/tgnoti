@@ -1,4 +1,9 @@
-import { CircuitBreakerConfig } from './monitoring.js';
+// Define the base circuit breaker configuration
+export interface CircuitBreakerConfig {
+  threshold: number;
+  resetTimeout: number;
+  testInterval: number;
+}
 
 // Enhanced monitoring types
 

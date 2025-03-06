@@ -12,8 +12,7 @@ import { TweetProcessor } from './services/TweetProcessor.js';
 import { EnhancedTweetMonitor } from './services/EnhancedTweetMonitor.js';
 import { EnhancedMetricsManager } from './core/monitoring/EnhancedMetricsManager.js';
 import { EnhancedRateLimiter } from './utils/enhancedRateLimiter.js';
-import { EnhancedCircuitBreakerConfig } from './types/monitoring-enhanced.js';
-import { CircuitBreakerConfig } from './types/monitoring.js';
+import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from './types/monitoring-enhanced.js';
 import { MetricsManager } from './core/monitoring/MetricsManager.js';
 import { ConsoleLogger } from './utils/logger.js';
 import { LoggingConfig } from './config/loggingConfig.js';
@@ -36,20 +35,13 @@ async function bootstrap() {
   try {
     logger.info('Starting Twitter Notification Service');
     
-    // Initialize services
-    let mongoService: MongoDBService | null = null;
-    try {
-      mongoService = container.get<MongoDBService>(TYPES.MongoDBService);
-      
-      await mongoService.initialize();
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error('Failed to initialize MongoDB service:', err);
-      logger.warn('Continuing in fallback mode without MongoDB. Some features may be limited.');
-    }
+    // Get MongoDB service
+    const mongoService = container.get<MongoDBService>(TYPES.MongoDBService);
     
+    // Initialize storage service (which will initialize MongoDB)
     const storageService = container.get<StorageService>(TYPES.StorageService);
     await storageService.initialize();
+    
     // Get references to services for shutdown handling
     const telegramService = container.get<TelegramService>(TYPES.TelegramService);
     const monitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);

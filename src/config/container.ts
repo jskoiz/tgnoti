@@ -5,8 +5,7 @@ import { SearchConfig } from './searchConfig.js';
 import { Environment } from './environment.js';
 import { FileMessageStorage } from '../telegram/storage/messageStorage.js';
 import { MessageStorage } from '../telegram/types/messageStorage.js';
-import { CircuitBreakerConfig } from '../types/monitoring.js';
-import { EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
+import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 import { Logger } from '../types/logger.js';
 import { LogService } from '../logging/LogService.js';
 import { ConsoleLogger } from '../utils/logger.js';
@@ -30,7 +29,6 @@ import { TopicFilterManager } from '../telegram/bot/TopicFilterManager.js';
 import { RettiwtKeyManager } from '../core/twitter/rettiwtKeyManager.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
 import { RettiwtErrorHandler } from '../core/twitter/RettiwtErrorHandler.js';
-import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { MessageValidator } from '../utils/messageValidator.js';
 import { EnhancedMessageFormatter } from '../telegram/bot/messageFormatter.js';
 import { TelegramMessageQueue } from '../telegram/queue/TelegramMessageQueue.js';
@@ -117,14 +115,8 @@ export function createContainer(): Container {
   // DatabaseManager is removed as we're using MongoDB exclusively
   container.bind<MongoDBManager>(TYPES.MongoDBManager).to(MongoDBManager).inSingletonScope();
   container.bind<MessageStorage>(TYPES.MessageStorage).to(FileMessageStorage).inSingletonScope();
-  container.bind<CircuitBreakerConfig>(TYPES.CircuitBreakerConfig).toConstantValue({
-    threshold: 5,
-    resetTimeout: 30000, // 30 seconds
-    testInterval: 5000   // 5 seconds
-  });
   container.bind<ErrorHandler>(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
   container.bind<RettiwtErrorHandler>(TYPES.RettiwtErrorHandler).to(RettiwtErrorHandler).inSingletonScope();
-  container.bind<CircuitBreaker>(TYPES.CircuitBreaker).to(CircuitBreaker).inSingletonScope();
   container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
   container.bind<EnhancedMetricsManager>(TYPES.EnhancedMetricsManager).to(EnhancedMetricsManager).inSingletonScope();
   container.bind<EnhancedRateLimiter>(TYPES.EnhancedRateLimiter).to(EnhancedRateLimiter).inSingletonScope();
@@ -133,7 +125,7 @@ export function createContainer(): Container {
   container.bind<MongoDataValidator>(TYPES.MongoDataValidator).to(MongoDataValidator).inSingletonScope();
   
   // Enhanced circuit breaker config
-  container.bind<EnhancedCircuitBreakerConfig>(TYPES.EnhancedCircuitBreakerConfig).toConstantValue({
+  container.bind<EnhancedCircuitBreakerConfig>(TYPES.CircuitBreakerConfig).toConstantValue({
     threshold: 5,
     resetTimeout: 30000, // 30 seconds
     testInterval: 5000,   // 5 seconds
