@@ -3,16 +3,27 @@ const TYPES = {
   Logger: Symbol.for('Logger'),
   LogService: Symbol.for('LogService'),
   LoggerFactory: Symbol.for('LoggerFactory'),
+  ConfigService: Symbol.for('ConfigService'),
   ConfigManager: Symbol.for('ConfigManager'),
   Storage: Symbol.for('Storage'),
   DatabaseManager: Symbol.for('DatabaseManager'),
   MongoDBManager: Symbol.for('MongoDBManager'),
+  MongoDBService: Symbol.for('MongoDBService'),
+  StorageService: Symbol.for('StorageService'),
+  TweetProcessor: Symbol.for('TweetProcessor'),
+  TelegramService: Symbol.for('TelegramService'),
+  TwitterService: Symbol.for('TwitterService'),
+  TweetMonitor: Symbol.for('TweetMonitor'),
   ErrorHandler: Symbol.for('ErrorHandler'),
   CircuitBreaker: Symbol.for('CircuitBreaker'),
   RettiwtErrorHandler: Symbol.for('RettiwtErrorHandler'),
   CircuitBreakerConfig: Symbol.for('CircuitBreakerConfig'),
+  EnhancedCircuitBreakerConfig: Symbol.for('EnhancedCircuitBreakerConfig'),
   UsernameHandler: Symbol.for('UsernameHandler'),
   MetricsManager: Symbol.for('MetricsManager'),
+  EnhancedMetricsManager: Symbol.for('EnhancedMetricsManager'),
+  EnhancedRateLimiter: Symbol.for('EnhancedRateLimiter'),
+  EnhancedTweetMonitor: Symbol.for('EnhancedTweetMonitor'),
   MonitoringDashboard: Symbol.for('MonitoringDashboard'),
 
   // Twitter services
@@ -32,23 +43,12 @@ const TYPES = {
   MessageFormatter: Symbol.for('MessageFormatter'),
   MessageStorage: Symbol.for('MessageStorage'),
 
-  // Pipeline components
-  TweetProcessingPipeline: Symbol.for('TweetProcessingPipeline'),
-  FetchStage: Symbol.for('FetchStage'),
-  FilterStage: Symbol.for('FilterStage'),
-  ValidationStage: Symbol.for('ValidationStage'),
-  FormatStage: Symbol.for('FormatStage'),
-  AgeValidationStage: Symbol.for('AgeValidationStage'),
-  DuplicateCheckStage: Symbol.for('DuplicateCheckStage'),
-  SendStage: Symbol.for('SendStage'),
-
   // Queue management
   RateLimitedQueue: Symbol.for('RateLimitedQueue'),
   MessageProcessor: Symbol.for('MessageProcessor'),
-
+  
   // Configuration
   LoggingConfig: Symbol.for('LoggingConfig'),
-  PipelineConfig: Symbol.for('PipelineConfig'),
   Environment: Symbol.for('Environment'),
   SearchConfig: Symbol.for('SearchConfig'),
   TweetTrackingConfig: Symbol.for('TweetTrackingConfig'),
@@ -59,8 +59,6 @@ const TYPES = {
   TweetFormatter: Symbol.for('TweetFormatter'),
   MessageValidator: Symbol.for('MessageValidator'),
   TwitterNotifier: Symbol.for('TwitterNotifier'),
-  TweetProcessor: Symbol.for('TweetProcessor'),
-  TweetMonitor: Symbol.for('TweetMonitor'),
 };
 
 export { TYPES };

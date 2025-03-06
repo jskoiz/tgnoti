@@ -84,11 +84,11 @@ export class RettiwtSearchBuilder {
         minLikes: config.minLikes || 0,
         minRetweets: config.minRetweets || 0,
         minReplies: config.minReplies || 0,
-        operator: 'AND',  // Force AND operator to ensure strict user matching
+        operator: 'OR',  // Use OR operator to be more inclusive
         // Add advanced filter options
         hasMedia: config.advancedFilters?.has_media,
         hasLinks: config.advancedFilters?.has_links ?? false,
-        replies: false, // Don't include replies to the user, only tweets from them
+        replies: config.advancedFilters?.include_replies ?? true, // Include replies from the user
         excludeWords: config.advancedFilters?.excludeWords,
         includePhrase: config.advancedFilters?.includePhrase
       };

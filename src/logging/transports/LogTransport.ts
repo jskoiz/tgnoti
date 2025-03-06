@@ -84,11 +84,27 @@ export class ConsoleTransport implements LogTransport {
     // Filter out specific messages from TweetProcessor
     if (component === 'TweetProcessor') {
       if (entry.message.includes('Processing search window')) return undefined;
+      // Filter out verbose tweet processing logs
+      if (entry.message.includes('Processing tweet') && entry.message.includes('for topic')) return undefined;
+      if (entry.message.includes('does not match filters for topic')) return undefined;
+      if (entry.message.includes('is a duplicate')) return undefined;
     }
     
     // Filter out specific messages from TwitterNotifier
     if (component === 'TwitterNotifier') {
       if (entry.message.includes('Processing search window')) return undefined;
+    }
+    
+    // Filter out verbose tweet search logs from TweetMonitor
+    if (component === 'TweetMonitor') {
+      if (entry.message.includes('Searching tweets for account:')) return undefined;
+      if (entry.message.includes('Found') && entry.message.includes('tweets for account')) return undefined;
+    }
+    
+    // Filter out verbose logs from Main component
+    if (component === 'Main') {
+      if (entry.message.includes('Processing tweet') && entry.message.includes('for topic')) return undefined;
+      if (entry.message.includes('does not match filters for topic')) return undefined;
     }
     
     // Special formatting for TelegramMessageSender logs

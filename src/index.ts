@@ -1,61 +1,86 @@
-// Load environment variables first
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import * as dotenv from 'dotenv';
-
 import 'reflect-metadata';
-import { Logger } from './types/logger.js';
-import { TYPES } from './types/di.js';
-import { TwitterNotifier } from './core/TwitterNotifier.js';
+import { config } from 'dotenv';
 import { initializeContainer } from './config/container.js';
+import { TYPES } from './types/di.js';
+import { Logger } from './types/logger.js';
+import { ConfigService } from './services/ConfigService.js';
+import { MongoDBService } from './services/MongoDBService.js';
+import { StorageService } from './services/StorageService.js';
+import { TwitterService } from './services/TwitterService.js';
+import { TelegramService } from './services/TelegramService.js';
+import { TweetProcessor } from './services/TweetProcessor.js';
+import { EnhancedTweetMonitor } from './services/EnhancedTweetMonitor.js';
+import { EnhancedMetricsManager } from './core/monitoring/EnhancedMetricsManager.js';
+import { EnhancedRateLimiter } from './utils/enhancedRateLimiter.js';
+import { EnhancedCircuitBreakerConfig } from './types/monitoring-enhanced.js';
+import { CircuitBreakerConfig } from './types/monitoring.js';
+import { MetricsManager } from './core/monitoring/MetricsManager.js';
+import { ConsoleLogger } from './utils/logger.js';
+import { LoggingConfig } from './config/loggingConfig.js';
 
-// Get directory path for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+async function bootstrap() {
+  // Load environment variables from .env file first
+  // This ensures all environment variables are available before any other initialization
+  const dotenvResult = config();
+  if (dotenvResult.error) {
+    console.error('Failed to load .env file:', dotenvResult.error);
+  }
+  // Initialize the container from container.ts
+  const container = await initializeContainer();
 
-async function main() {
+  // Note: The container from initializeContainer already has all services initialized
+
+  const logger = container.get<Logger>(TYPES.Logger);
+  logger.setComponent('Main');
+  
   try {
-    const envPath = `${dirname(__dirname)}/.env`;
-    console.log('Loading environment variables from:', envPath);
+    logger.info('Starting Twitter Notification Service');
     
-    // Load .env file from project root
-    const result = dotenv.config({ path: envPath });
-    if (result.error) {
-      console.error('Error loading .env file:', result.error);
+    // Initialize services
+    let mongoService: MongoDBService | null = null;
+    try {
+      mongoService = container.get<MongoDBService>(TYPES.MongoDBService);
+      
+      await mongoService.initialize();
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Failed to initialize MongoDB service:', err);
+      logger.warn('Continuing in fallback mode without MongoDB. Some features may be limited.');
     }
     
-    // Verify environment variables are loaded
-    if (!process.env.SEARCH_WINDOW_MINUTES) {
-      console.error('Required environment variable SEARCH_WINDOW_MINUTES is not set');
-      process.exit(1);
-    }
+    const storageService = container.get<StorageService>(TYPES.StorageService);
+    await storageService.initialize();
+    // Get references to services for shutdown handling
+    const telegramService = container.get<TelegramService>(TYPES.TelegramService);
+    const monitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);
     
-    // Initialize the DI container
-    const container = await initializeContainer(); // Now properly awaited
-    
-    // Get logger instance
-    const logger = container.get<Logger>(TYPES.Logger);
-    logger.info('Application starting...');
-
-    // Initialize the Twitter notifier
-    const twitterNotifier = container.get<TwitterNotifier>(TYPES.TwitterNotifier);
-    await twitterNotifier.start();
-
-    // Handle shutdown gracefully
     process.on('SIGINT', async () => {
       logger.info('Shutting down...');
-      await twitterNotifier.stop();
+      if (monitor) {
+        await monitor.stop(); 
+      }
+      
+      try {
+        await telegramService.stop();
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Error stopping Telegram service:', err);
+      }
+      
+      if (mongoService) {
+        await mongoService.close();
+      }
       process.exit(0);
     });
-
-    logger.info('Application started successfully');
+    
+    logger.info('Service started successfully');
   } catch (error) {
-    console.error('Failed to start application:', error instanceof Error ? error.message : error);
+    logger.error('Failed to start service:', error instanceof Error ? error : new Error(String(error)));
     process.exit(1);
   }
 }
 
-main().catch(error => {
-  console.error('Unhandled error:', error);
+bootstrap().catch(error => {
+  console.error('Unhandled error in bootstrap:', error);
   process.exit(1);
 });

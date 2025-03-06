@@ -1,16 +1,14 @@
 import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
 import { Logger } from '../../types/logger.js';
-import { DatabaseManager } from '../../core/storage/DatabaseManager.js';
 import {
   TopicFilter,
   FilterType,
   FilterPermission,
-  FilterOperationResult,
-  TopicFilterRecord
+  FilterOperationResult
 } from '../../types/filters.js';
 import { TOPIC_CONFIG } from '../../config/topicConfig.js';
-import { MONITORING_ACCOUNTS } from '../../config/monitoring.js';
+import { MongoDBService } from '../../services/MongoDBService.js';
 
 @injectable()
 export class TopicFilterManager {
@@ -20,73 +18,15 @@ export class TopicFilterManager {
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
-    @inject(TYPES.DatabaseManager) private db: DatabaseManager
+    @inject(TYPES.MongoDBService) private mongoDb: MongoDBService
   ) {
-    // Initialize filters from config and set up competitor channels during construction
+    this.logger.setComponent('TopicFilterManager');
+    // Initialize filters from config during construction
     // Run sequentially instead of in parallel to avoid race conditions
     this.initializeFiltersFromConfig()
-      .then(() => this.initializeCompetitorChannels())
       .catch(err => {
-        this.logger.error('Failed to initialize filters or competitor channels', err);
+        this.logger.error('Failed to initialize filters', err);
       });
-  }
-
-  private async initializeCompetitorChannels(): Promise<void> {
-    try {
-      // Get all competitor accounts
-      const competitorTopicIds = [5572, 5573, 5574, 6355, 6317, 6314, 6320];
-      const competitorAccounts = MONITORING_ACCOUNTS
-        .filter(account => competitorTopicIds.includes(account.topicId))
-        .map(account => account.account);
-      
-      if (competitorAccounts.length === 0) {
-        this.logger.warn('No competitor accounts found for channel initialization');
-        return;
-      }
-      
-      // Initialize Competitor Tweets channel (12111) with user filters for all competitors
-      const competitorTweetsTopicId = 12111;
-      const existingTweetFilters = await this.getFilters(competitorTweetsTopicId);
-      const existingTweetFilterKeys = new Set(
-        existingTweetFilters.map(f => `${f.type}:${f.value}`)
-      );
-      
-      for (const account of competitorAccounts) {
-        const filterKey = `user:${account.toLowerCase()}`;
-        if (!existingTweetFilterKeys.has(filterKey)) {
-          await this.addFilterSafe(competitorTweetsTopicId, {
-            type: 'user',
-            value: account
-          }, 0); // Using 0 as system user ID
-        }
-      }
-      
-      // Initialize Competitor Mentions channel (12110) with mention filters for all competitors
-      const competitorMentionsTopicId = 12110;
-      const existingMentionFilters = await this.getFilters(competitorMentionsTopicId);
-      const existingMentionFilterKeys = new Set(
-        existingMentionFilters.map(f => `${f.type}:${f.value}`)
-      );
-      
-      for (const account of competitorAccounts) {
-        const filterKey = `mention:${account.toLowerCase()}`;
-        if (!existingMentionFilterKeys.has(filterKey)) {
-          await this.addFilterSafe(competitorMentionsTopicId, {
-            type: 'mention',
-            value: account
-          }, 0); // Using 0 as system user ID
-        }
-      }
-      
-      this.logger.info('Successfully initialized competitor channels', {
-        competitorTweetsFilters: competitorAccounts.length,
-        competitorMentionsFilters: competitorAccounts.length
-      });
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error('Failed to initialize competitor channels', err);
-      throw err;
-    }
   }
 
   private async initializeFiltersFromConfig(): Promise<void> {
@@ -133,18 +73,7 @@ export class TopicFilterManager {
 
   async getFilters(topicId: number): Promise<TopicFilter[]> {
     try {
-      const records = await this.db.query<TopicFilterRecord>(
-        'SELECT * FROM topic_filters WHERE topic_id = ?',
-        [topicId]
-      );
-
-      return records.map((record: TopicFilterRecord) => ({
-        id: record.id,
-        type: record.filter_type,
-        value: record.value,
-        createdAt: new Date(record.created_at),
-        createdBy: record.created_by || undefined
-      }));
+      return await this.mongoDb.getTopicFilters(topicId);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error('Failed to get filters', err);
@@ -178,17 +107,14 @@ export class TopicFilterManager {
         filter.value = filter.value.replace(/^@/, '');
       }
 
-      await this.db.run(
-        'INSERT INTO topic_filters (topic_id, filter_type, value, created_by) VALUES (?, ?, ?, ?)',
-        [topicId, filter.type, filter.value, userId]
-      );
+      await this.mongoDb.addTopicFilter(topicId, filter, userId);
 
       return {
         success: true,
         message: `Successfully added ${filter.type} filter: ${filter.value}`
       };
     } catch (error) {
-      if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+      if (error instanceof Error && error.message.includes('duplicate key error')) {
         this.logger.debug(`Filter already exists: ${filter.type}:${filter.value} for topic ${topicId}`);
         return {
           success: true, // Changed from false to true to prevent errors during initialization
@@ -254,10 +180,10 @@ export class TopicFilterManager {
         value = value.replace(/^@/, '');
       }
 
-      const result = await this.db.run(
-        'DELETE FROM topic_filters WHERE topic_id = ? AND filter_type = ? AND value = ?',
-        [topicId, filter.type, value]
-      );
+      await this.mongoDb.removeTopicFilter(topicId, {
+        type: filter.type,
+        value
+      });
 
       return {
         success: true,

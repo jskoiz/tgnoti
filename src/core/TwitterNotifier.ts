@@ -6,13 +6,13 @@ import { Logger } from '../types/logger.js';
 import { Environment } from '../config/environment.js';
 import { TYPES } from '../types/di.js';
 import { DateValidator, DateValidationError } from '../utils/dateValidation.js';
-import { TweetProcessor } from './TweetProcessor.js';
+import { TweetProcessor } from '../services/TweetProcessor.js';
 import { SearchStrategy } from './twitter/searchStrategy.js';
 import { MetricsManager } from './monitoring/MetricsManager.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
-import { SearchQueryConfig } from '../types/twitter.js';
-import { MONITORING_ACCOUNTS } from '../config/monitoring.js';
+import { SearchQueryConfig, Tweet } from '../types/twitter.js';
 import { SearchConfig } from '../config/searchConfig.js';
+import { ConfigService } from '../services/ConfigService.js';
 
 @injectable()
 export class TwitterNotifier {
@@ -28,7 +28,8 @@ export class TwitterNotifier {
     @inject(TYPES.SearchStrategy) private searchStrategy: SearchStrategy,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.ErrorHandler) private errorHandler: ErrorHandler,
-    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig
+    @inject(TYPES.SearchConfig) private searchConfig: SearchConfig,
+    @inject(TYPES.ConfigService) private configService: ConfigService
   ) {}
 
   async initialize(): Promise<void> {
@@ -78,7 +79,7 @@ export class TwitterNotifier {
       const envConfig = this.environment.getConfig();
       
       this.logger.debug('Starting notifier', {
-        system: 'pipeline',
+        system: 'simplified',
         pollingInterval: envConfig.monitoring.polling.intervalMinutes
       });
       
@@ -97,52 +98,74 @@ export class TwitterNotifier {
           const searchQueries = config.twitter.searchQueries as Record<string, SearchQueryConfig>;
           let processed = 0, sent = 0, errors = 0;
 
-          // Process each monitoring account
-          for (const monitoringAccount of MONITORING_ACCOUNTS) {
-            // Get search window from config
-            const window = await this.searchConfig.createSearchWindow();
-            const topicId = monitoringAccount.topicId.toString();
-
-            // Validate search window to prevent duplicate processing
-            if (await this.searchConfig.validateSearchWindow(topicId, window)) {
-              this.logger.logObject('debug', 'Processing search window', {
-                account: monitoringAccount.account,
-                window: `${new Date(window.startDate).toLocaleTimeString()} - ${new Date(window.endDate).toLocaleTimeString()}`
-              });
-
-              // Get new tweets using SearchStrategy
-              const tweets = await this.searchStrategy.search({
-                username: monitoringAccount.account,
-                startDate: window.startDate,
-                endDate: window.endDate,
-                excludeRetweets: true,
-                excludeQuotes: true,
-                language: 'en'
-              });
-
-              if (tweets.length > 0) {
-                const batchStartTime = Date.now();
-
-                // Process tweets in batch
-                await this.tweetProcessor.processTweetBatch(tweets, topicId);
-
-                // Update metrics
-                processed += tweets.length;
-                sent += tweets.length; // Actual success/failure tracked in processor
-                
-                this.metrics.timing('notifier.pipeline.batch_processing_time', Date.now() - batchStartTime);
-                this.metrics.increment('notifier.pipeline.tweets_processed', tweets.length);
-              }
-            } else {
-              this.logger.debug('Skipping already processed window', { topicId });
+          // Get all topics from ConfigService
+          const topics = this.configService.getTopics();
+          
+          // Process each topic and its accounts
+          for (const topic of topics) {
+            const topicId = topic.id.toString();
+            
+            // Skip topics with no accounts
+            if (!topic.accounts || topic.accounts.length === 0) {
+              this.logger.debug(`Skipping topic ${topic.name} with no accounts`);
+              continue;
             }
+            
+            // Process each account in the topic
+            for (const account of topic.accounts) {
+              // Get search window from config
+              const window = await this.searchConfig.createSearchWindow();
 
+              // Validate search window to prevent duplicate processing
+              const searchWindowKey = `${topicId}:${account}`;
+              if (await this.searchConfig.validateSearchWindow(searchWindowKey, window)) {
+                this.logger.logObject('debug', 'Processing search window', {
+                  account,
+                  topic: topic.name,
+                  window: `${new Date(window.startDate).toLocaleTimeString()} - ${new Date(window.endDate).toLocaleTimeString()}`
+                });
+
+                // Get new tweets using SearchStrategy
+                const tweets = await this.searchStrategy.search({
+                  username: account,
+                  startDate: window.startDate,
+                  endDate: window.endDate,
+                  excludeRetweets: true,
+                  excludeQuotes: true,
+                  language: 'en'
+                });
+
+                if (tweets.length > 0) {
+                  const batchStartTime = Date.now();
+
+                  // Process tweets individually with the TweetProcessor
+                  for (const tweet of tweets) {
+                    try {
+                      const success = await this.tweetProcessor.processTweet(tweet, topic);
+                      if (success) {
+                        sent++;
+                      }
+                      processed++;
+                    } catch (tweetError) {
+                      errors++;
+                      this.logger.error(`Error processing tweet ${tweet.id}:`, 
+                        tweetError instanceof Error ? tweetError : new Error(String(tweetError)));
+                    }
+                  }
+                
+                  this.metrics.timing('notifier.processing.batch_time', Date.now() - batchStartTime);
+                  this.metrics.increment('notifier.processing.tweets_processed', tweets.length);
+                }
+              } else {
+                this.logger.debug('Skipping already processed window', { topicId, account });
+              }
+            }
           }
           
           // Log processing summary
           this.logger.logObject('debug', 'Processing cycle complete', {
             stats: `${processed} processed, ${sent} sent, ${errors} errors`,
-            system: 'pipeline'
+            system: 'simplified'
           });
           
           // Perform storage cleanup

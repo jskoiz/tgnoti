@@ -3,7 +3,7 @@ import { MongoClient, Collection, Db, IndexDescription } from 'mongodb';
 import { TYPES } from '../../types/di.js';
 import { Logger } from '../../types/logger.js';
 import { Environment } from '../../config/environment.js';
-import { TweetDocument, MongoConfig, MongoIndexConfig } from '../../types/mongodb.js';
+import { TweetDocument, TopicFilterDocument, MongoConfig, MongoIndexConfig } from '../../types/mongodb.js';
 import { MetricsManager } from '../monitoring/MetricsManager.js';
 
 @injectable()
@@ -15,7 +15,8 @@ export class MongoDBManager {
     uri: '',
     dbName: 'twitter_notifications',
     collections: {
-      tweets: 'tweets'
+      tweets: 'tweets',
+      topicFilters: 'topic_filters'
     }
   };
 
@@ -82,6 +83,11 @@ export class MongoDBManager {
         await this.db.createCollection(this.config.collections.tweets);
         this.logger.info(`Created collection: ${this.config.collections.tweets}`);
       }
+      
+      if (!collectionNames.includes(this.config.collections.topicFilters)) {
+        await this.db.createCollection(this.config.collections.topicFilters);
+        this.logger.info(`Created collection: ${this.config.collections.topicFilters}`);
+      }
     } catch (error) {
       this.logger.error('Failed to setup collections:', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -98,19 +104,38 @@ export class MongoDBManager {
         'metadata.capturedAt': { unique: false },
         'processingStatus.isAnalyzed': { unique: false },
         text: { text: true }
+      },
+      topicFilters: {
+        'topicId': { unique: false },
+        'topicId_filterType_value': { unique: true }
       }
     };
 
     try {
       const tweetsCollection = this.getTweetsCollection();
+      const topicFiltersCollection = this.getTopicFiltersCollection();
       
-      // Create indexes based on config
+      // Create indexes for tweets collection
       const indexes: IndexDescription[] = Object.entries(indexConfig.tweets).map(([key, options]) => ({
         key: { [key]: 1 },
         ...options
       }));
-
+      
+      // Create indexes for topic filters collection
+      const topicFilterIndexes: IndexDescription[] = [
+        {
+          key: { topicId: 1 },
+          unique: false
+        },
+        {
+          key: { topicId: 1, filterType: 1, value: 1 },
+          unique: true
+        }
+      ];
+      
+      // Apply indexes
       await tweetsCollection.createIndexes(indexes);
+      await topicFiltersCollection.createIndexes(topicFilterIndexes);
       this.logger.info('MongoDB indexes created successfully');
     } catch (error) {
       this.logger.error('Failed to create indexes:', error instanceof Error ? error : new Error(String(error)));
@@ -121,6 +146,11 @@ export class MongoDBManager {
   private getTweetsCollection(): Collection<TweetDocument> {
     if (!this.db) throw new Error('Database not initialized');
     return this.db.collection<TweetDocument>(this.config.collections.tweets);
+  }
+
+  private getTopicFiltersCollection(): Collection<TopicFilterDocument> {
+    if (!this.db) throw new Error('Database not initialized');
+    return this.db.collection(this.config.collections.topicFilters);
   }
 
   async saveTweet(tweet: TweetDocument): Promise<void> {

@@ -7,18 +7,23 @@ import { TweetTrackingConfig } from './tweetTracking.js';
 import { FileMessageStorage } from '../telegram/storage/messageStorage.js';
 import { MessageStorage } from '../telegram/types/messageStorage.js';
 import { CircuitBreakerConfig } from '../types/monitoring.js';
+import { EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 import { Logger } from '../types/logger.js';
 import { LogService } from '../logging/LogService.js';
 import { ConsoleLogger } from '../utils/logger.js';
 import { Storage } from '../core/storage/storage.js';
 import { DatabaseManager } from '../core/storage/DatabaseManager.js';
 import { ConfigManager } from './ConfigManager.js';
+import { ConfigService } from '../services/ConfigService.js';
 import { MongoDBManager } from '../core/storage/MongoDBManager.js';
+import { TwitterService } from '../services/TwitterService.js';
+import { MongoDBService } from '../services/MongoDBService.js';
+import { StorageService } from '../services/StorageService.js';
 import { TwitterClient } from '../core/twitter/twitterClient.js';
 import { RettiwtSearchBuilder } from '../core/twitter/rettiwtSearchBuilder.js';
 import { SearchStrategy } from '../core/twitter/searchStrategy.js';
 import { SearchCacheManager } from '../core/twitter/SearchCacheManager.js';
-import { TweetMonitor } from '../core/TweetMonitor.js';
+import { TweetMonitor } from '../services/TweetMonitor.js';
 import { MessageProcessor } from '../core/MessageProcessor.js';
 import { TelegramBot } from '../telegram/bot/telegramBot.js';
 import { TopicManager } from '../telegram/bot/TopicManager.js';
@@ -32,25 +37,20 @@ import { EnhancedMessageFormatter } from '../telegram/bot/messageFormatter.js';
 import { TelegramMessageQueue } from '../telegram/queue/TelegramMessageQueue.js';
 import { TelegramMessageSender } from '../telegram/queue/TelegramMessageSender.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
+import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManager.js';
+import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
 import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
 import { TwitterNotifier } from '../core/TwitterNotifier.js';
 import { MonitoringDashboard } from '../core/monitoring/MonitoringDashboard.js';
 import { DateValidator } from '../utils/dateValidation.js';
-import { TweetProcessor } from '../core/TweetProcessor.js';
-import { TweetProcessingPipeline } from '../core/pipeline/TweetProcessingPipeline.js';
-import { FetchStage } from '../core/pipeline/stages/FetchStage.js';
-import { AgeValidationStage } from '../core/pipeline/stages/AgeValidationStage.js';
-import { DuplicateCheckStage } from '../core/pipeline/stages/DuplicateCheckStage.js';
-import { ValidationStage } from '../core/pipeline/stages/ValidationStage.js';
-import { FilterStage } from '../core/pipeline/stages/FilterStage.js';
-import { FormatStage } from '../core/pipeline/stages/FormatStage.js';
-import { SendStage } from '../core/pipeline/stages/SendStage.js';
+import { TweetProcessor } from '../services/TweetProcessor.js';
+import { TelegramService } from '../services/TelegramService.js';
 import { UsernameHandler } from '../utils/usernameHandler.js';
+import { EnhancedTweetMonitor } from '../services/EnhancedTweetMonitor.js';
 
 import TelegramBotApi from 'node-telegram-bot-api';
 import { TelegramQueueConfig } from '../types/telegram.js';
 import { TelegramConfig } from './telegram.js';
-import { PipelineConfig } from '../core/pipeline/types/PipelineTypes.js';
 import { TelegramBotService } from '../telegram/bot/telegramBotService.js';
 import { LoggingConfig } from './loggingConfig.js';
 import { LoggerFactory } from '../logging/LoggerFactory.js';
@@ -94,6 +94,9 @@ export function createContainer(): Container {
 
   // Core Services
   container.bind<ConfigManager>(TYPES.ConfigManager).to(ConfigManager).inSingletonScope();
+  container.bind<ConfigService>(TYPES.ConfigService).to(ConfigService).inSingletonScope();
+  container.bind<MongoDBService>(TYPES.MongoDBService).to(MongoDBService).inSingletonScope();
+  container.bind<StorageService>(TYPES.StorageService).to(StorageService).inSingletonScope();
   
   // Initialize ConfigManager first
   const configManager = container.get<ConfigManager>(TYPES.ConfigManager);
@@ -115,7 +118,19 @@ export function createContainer(): Container {
   container.bind<RettiwtErrorHandler>(TYPES.RettiwtErrorHandler).to(RettiwtErrorHandler).inSingletonScope();
   container.bind<CircuitBreaker>(TYPES.CircuitBreaker).to(CircuitBreaker).inSingletonScope();
   container.bind<MetricsManager>(TYPES.MetricsManager).to(MetricsManager).inSingletonScope();
+  container.bind<EnhancedMetricsManager>(TYPES.EnhancedMetricsManager).to(EnhancedMetricsManager).inSingletonScope();
+  container.bind<EnhancedRateLimiter>(TYPES.EnhancedRateLimiter).to(EnhancedRateLimiter).inSingletonScope();
+  container.bind<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor).to(EnhancedTweetMonitor).inSingletonScope();
   container.bind<MonitoringDashboard>(TYPES.MonitoringDashboard).to(MonitoringDashboard).inSingletonScope();
+  
+  // Enhanced circuit breaker config
+  container.bind<EnhancedCircuitBreakerConfig>(TYPES.EnhancedCircuitBreakerConfig).toConstantValue({
+    threshold: 5,
+    resetTimeout: 30000, // 30 seconds
+    testInterval: 5000,   // 5 seconds
+    monitorInterval: 5000 // 5 seconds
+  });
+  
   container.bind<UsernameHandler>(TYPES.UsernameHandler).to(UsernameHandler).inSingletonScope();
   container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
 
@@ -126,26 +141,9 @@ export function createContainer(): Container {
   container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
   container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
   container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
+  container.bind<TwitterService>(TYPES.TwitterService).to(TwitterService).inSingletonScope();
   container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
-  
-  // Pipeline Configuration
-  container.bind<PipelineConfig>(TYPES.PipelineConfig).toConstantValue({
-    enableValidation: true,
-    enableFiltering: true,
-    enableFormatting: true,
-    retryCount: 3,
-    timeoutMs: 30000
-  });
-  container.bind<TweetProcessingPipeline>(TYPES.TweetProcessingPipeline).to(TweetProcessingPipeline).inSingletonScope();
-  
-  // Pipeline Stages
-  container.bind<FetchStage>(TYPES.FetchStage).to(FetchStage).inSingletonScope();
-  container.bind<DuplicateCheckStage>(TYPES.DuplicateCheckStage).to(DuplicateCheckStage).inSingletonScope();
-  container.bind<AgeValidationStage>(TYPES.AgeValidationStage).to(AgeValidationStage).inSingletonScope();
-  container.bind<ValidationStage>(TYPES.ValidationStage).to(ValidationStage).inSingletonScope();
-  container.bind<FilterStage>(TYPES.FilterStage).to(FilterStage).inSingletonScope();
-  container.bind<FormatStage>(TYPES.FormatStage).to(FormatStage).inSingletonScope();
-  container.bind<SendStage>(TYPES.SendStage).to(SendStage).inSingletonScope();
+  container.bind<TelegramService>(TYPES.TelegramService).to(TelegramService).inSingletonScope();
   container.bind<RettiwtKeyManager>(TYPES.RettiwtKeyManager).to(RettiwtKeyManager).inSingletonScope();
 
   // Telegram Related
@@ -200,33 +198,39 @@ export async function initializeContainer(): Promise<Container> {
   const container = createContainer();
   
   // Initialize database
-  await Promise.all([
-    container.get<DatabaseManager>(TYPES.DatabaseManager).initialize(),
-    container.get<MongoDBManager>(TYPES.MongoDBManager).initialize()
-  ]).catch(error => {
-    if (error instanceof Error) {
-      console.error('Failed to initialize databases:', error.message);
-      if (error.stack) {
-        console.error(error.stack);
+  try {
+    await Promise.all([
+      container.get<StorageService>(TYPES.StorageService).initialize()
+    ]).catch(error => {
+      if (error instanceof Error) {
+        console.error('Failed to initialize databases:', error.message);
+        if (error.stack) {
+          console.error(error.stack);
+        }
+      } else {
+        console.error('Failed to initialize databases:', error);
       }
-    } else {
-      console.error('Failed to initialize databases:', error);
-    }
-    process.exit(1);
-  });
+      console.warn('Continuing in fallback mode without full database support. Some features may be limited.');
+    });
+  } catch (error) {
+    console.error('Unexpected error during initialization:', error);
+    console.warn('Continuing in fallback mode without full database support. Some features may be limited.');
+  }
 
-  // Initialize pipeline
-  const pipeline = container.get<TweetProcessingPipeline>(TYPES.TweetProcessingPipeline);
-  const fetchStage = container.get<FetchStage>(TYPES.FetchStage);
-  const duplicateCheckStage = container.get<DuplicateCheckStage>(TYPES.DuplicateCheckStage);
-  const ageValidationStage = container.get<AgeValidationStage>(TYPES.AgeValidationStage);
-  const validationStage = container.get<ValidationStage>(TYPES.ValidationStage);
-  const filterStage = container.get<FilterStage>(TYPES.FilterStage);
-  const formatStage = container.get<FormatStage>(TYPES.FormatStage);
-  const sendStage = container.get<SendStage>(TYPES.SendStage);
-  
-  // Add stages in order
-  [fetchStage, duplicateCheckStage, ageValidationStage, validationStage, filterStage, formatStage, sendStage].forEach(stage => pipeline.addStage(stage));
+  // Initialize services
+  const telegramService = container.get<TelegramService>(TYPES.TelegramService);
+  await telegramService.initialize();
+
+  // Start monitoring
+  // Use enhanced monitor if available, otherwise fall back to regular monitor
+  try {
+    const enhancedMonitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);
+    await enhancedMonitor.initialize();
+    await enhancedMonitor.start();
+  } catch (error) {
+    console.warn('Enhanced monitor not available, using regular monitor');
+    await container.get<TweetMonitor>(TYPES.TweetMonitor).start();
+  }
   
   return container;
 }
