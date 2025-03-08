@@ -16,6 +16,7 @@ import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from './types/moni
 import { MetricsManager } from './core/monitoring/MetricsManager.js';
 import { ConsoleLogger } from './utils/logger.js';
 import { LoggingConfig } from './config/loggingConfig.js';
+import { LoggerFactory } from './logging/LoggerFactory.js';
 
 async function bootstrap() {
   // Load environment variables from .env file first
@@ -24,10 +25,20 @@ async function bootstrap() {
   if (dotenvResult.error) {
     console.error('Failed to load .env file:', dotenvResult.error);
   }
+  // Check for quiet mode environment variable
+  const quietMode = process.env.QUIET_LOGGING === 'true' || process.env.QUIET_LOGGING === '1';
+  
   // Initialize the container from container.ts
   const container = await initializeContainer();
 
   // Note: The container from initializeContainer already has all services initialized
+
+  // Set quiet mode if environment variable is set
+  if (quietMode) {
+    const loggerFactory = LoggerFactory.getInstance();
+    loggerFactory.setQuietMode(true);
+    console.log('Quiet logging mode enabled - showing only startup, cycle, search, tweet found, and rate limit messages');
+  }
 
   const logger = container.get<Logger>(TYPES.Logger);
   logger.setComponent('Main');

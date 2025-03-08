@@ -47,6 +47,7 @@ export interface LoggingConfig {
 @injectable()
 export class LoggerFactory {
   private static instance: LoggerFactory;
+  private quietMode: boolean = false;
   private config: LoggingConfig = {
     defaultLevel: LogLevel.INFO,
     format: 'text',
@@ -134,7 +135,8 @@ export class LoggerFactory {
     
     // Add console transport by default
     this.transports.push(new ConsoleTransport({
-      format: this.config.format
+      format: this.config.format,
+      quietMode: this.quietMode
     }));
     
     // Add file transport if configured
@@ -167,5 +169,30 @@ export class LoggerFactory {
    */
   async flushAll(): Promise<void> {
     await Promise.all(this.transports.map(transport => transport.flush()));
+  }
+  
+  /**
+   * Enable or disable quiet mode
+   *
+   * In quiet mode, only important messages are shown:
+   * - Startup messages
+   * - Cycle start/end messages
+   * - Search execution messages
+   * - Tweet found/not found messages
+   * - Rate limit messages
+   * - Error messages
+   *
+   * @param enabled Whether to enable quiet mode
+   */
+  setQuietMode(enabled: boolean): void {
+    this.quietMode = enabled;
+    this.setupTransports();
+  }
+  
+  /**
+   * Check if quiet mode is enabled
+   */
+  isQuietMode(): boolean {
+    return this.quietMode;
   }
 }

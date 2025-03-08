@@ -112,6 +112,10 @@ export const TOPIC_CONFIG: Record<string, TopicDetails> = {
       },
       {
         type: 'user',
+        value: '0xjbam'
+      },
+      {
+        type: 'user',
         value: 'artsch00lreject'
       }
     ]

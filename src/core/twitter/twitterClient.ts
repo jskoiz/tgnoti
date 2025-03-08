@@ -142,7 +142,8 @@ export class TwitterClient {
   private async performSearch(params: TweetFilter): Promise<Tweet[]> {
     const searchConfig: SearchQueryConfig = {
       type: 'structured',
-      accounts: params.fromUsers,
+      // Use fromUsers as a top-level parameter for tweets authored by these users
+      fromUsers: params.fromUsers,
       mentions: params.mentions,
       keywords: params.includeWords,
       language: params.language || 'en',
@@ -153,15 +154,28 @@ export class TwitterClient {
       minReplies: params.minReplies,
       excludeRetweets: true,
       excludeQuotes: true,
-      advancedFilters: { include_replies: params.replies || false }
+      advancedFilters: {
+        include_replies: params.replies || false
+      }
     };
 
     // Add detailed logging for search parameters
-    this.logger.debug('Twitter search parameters', {
-      accounts: params.fromUsers,
-      startTime: params.startDate?.toISOString(),
-      endTime: params.endDate?.toISOString(),
-      language: params.language || 'en'
+    if (params.fromUsers && params.fromUsers.length > 0) {
+      this.logger.info(`Searching for tweets AUTHORED BY: ${params.fromUsers.join(', ')}`, {
+        searchType: 'from_users',
+        users: params.fromUsers
+      });
+    }
+    
+    // Enhanced logging to show complete search configuration
+    this.logger.debug('Twitter search configuration', {
+      fromUsers: searchConfig.fromUsers,
+      accounts: searchConfig.accounts,
+      mentions: searchConfig.mentions,
+      startTime: searchConfig.startTime,
+      endTime: searchConfig.endTime,
+      language: searchConfig.language,
+      advancedFilters: searchConfig.advancedFilters
     });
 
     // Check if we're in cooldown before attempting search

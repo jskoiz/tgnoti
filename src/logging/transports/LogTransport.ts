@@ -31,11 +31,19 @@ export class ConsoleTransport implements LogTransport {
   private readonly useColors: boolean;
   private readonly format: 'json' | 'text';
   private readonly formatter: ColorFormatter;
+  private pendingRejections: Map<string, { count: number, usernames: string[] }>;
+  private currentSearchType: string | null;
+  private flushTimeoutId: NodeJS.Timeout | null = null;
+  private readonly quietMode: boolean;
   
-  constructor(options: { useColors?: boolean; format?: 'json' | 'text' } = {}) {
+  constructor(options: { useColors?: boolean; format?: 'json' | 'text'; quietMode?: boolean } = {}) {
     this.useColors = options.useColors ?? true;
     this.format = options.format ?? 'text';
     this.formatter = new ColorFormatter(this.useColors);
+    this.quietMode = options.quietMode ?? false;
+    // Initialize collections
+    this.currentSearchType = null;
+    this.pendingRejections = new Map();
   }
   
   log(entry: LogEntry): void {
@@ -45,6 +53,16 @@ export class ConsoleTransport implements LogTransport {
       else if (entry.message.includes('pipeline') || entry.message.includes('Pipeline')) entry.message = `[PIPE] ${entry.message}`;
       else if (entry.message.includes('stage') || entry.message.includes('Stage')) entry.message = `[STAGE] ${entry.message}`;
       else if (entry.message.includes('search') || entry.message.includes('Search')) entry.message = `[SRCH] ${entry.message}`;
+      else if (entry.message.includes('kol_monitoring')) {
+        this.currentSearchType = 'kol';
+        entry.message = `[KOL] ${entry.message.replace('kol_monitoring', '')}`;
+      } else if (entry.message.includes('competitor_mentions')) {
+        this.currentSearchType = 'mentions';
+        entry.message = `[MENTIONS] ${entry.message.replace('competitor_mentions', '')}`;
+      } else if (entry.message.includes('competitor_tweets')) {
+        this.currentSearchType = 'tweets';
+        entry.message = `[TWEETS] ${entry.message.replace('competitor_tweets', '')}`;
+      }
       else if (entry.message.includes('valid') || entry.message.includes('Valid')) entry.message = `[VALD] ${entry.message}`;
     }
     
@@ -73,10 +91,131 @@ export class ConsoleTransport implements LogTransport {
     return Promise.resolve();
   }
   
+  // Flush pending rejections and output a combined message
+  private flushPendingRejections(): void {
+    if (this.pendingRejections.size === 0) return;
+    
+    for (const [reason, data] of this.pendingRejections.entries()) {
+      if (data.count > 0) {
+        const usernames = data.usernames.slice(0, 3).join(', ');
+        const additionalCount = data.usernames.length > 3 ? ` and ${data.usernames.length - 3} more` : '';
+        
+        // Format the combined rejection message
+        const date = new Date();
+        const timestamp = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        
+        let message = `[${timestamp}] [Main] ${this.formatter.red('[REJECTED]')} ${data.count} tweets outside time window`;
+        if (usernames) {
+          message += ` from @${usernames}${additionalCount}`;
+        }
+        message += ` (${reason})`;
+        
+        console.log(message);
+      }
+    }
+    
+    // Clear the pending rejections
+    this.pendingRejections.clear();
+    
+    // Clear the timeout ID
+    this.flushTimeoutId = null;
+  }
+  
+  // Helper method to add a tweet rejection to the pending list
+  private addRejection(reason: string, username: string): void {
+    if (!this.pendingRejections.has(reason)) {
+      this.pendingRejections.set(reason, { count: 0, usernames: [] });
+    }
+    
+    const data = this.pendingRejections.get(reason)!;
+    data.count++;
+    
+    if (!data.usernames.includes(username) && data.usernames.length < 10) {
+      data.usernames.push(username);
+    }
+    
+    // Schedule a flush if not already scheduled
+    if (!this.flushTimeoutId) {
+      this.flushTimeoutId = setTimeout(() => {
+        this.flushPendingRejections();
+      }, 2000); // Flush after 2 seconds of inactivity
+    }
+  }
+  
+  // Get a colored tag based on the current search type
+  private getSearchTypeTag(): string {
+    switch (this.currentSearchType) {
+      case 'kol':
+        return this.formatter.green('[KOL]');
+      case 'mentions':
+        return this.formatter.yellow('[MENTIONS]');
+      case 'tweets':
+        return this.formatter.blue('[TWEETS]');
+      default:
+        return this.formatter.cyan('[SEARCH]');
+    }
+  }
+  
   private formatText(entry: LogEntry): string | undefined {
     // Format timestamp as [MM-DD HH:mm:ss] with color
     const date = new Date(entry.timestamp);
-    const timestamp = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+    // Simplified timestamp format (HH:MM)
+    const timestamp = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    
+    // Skip detailed time window check messages
+    if (entry.component === 'Main' && entry.message.includes('Time window check for tweet')) {
+      return undefined;
+    }
+    
+    // Skip "Future system date detected" messages
+    if (entry.component === 'Main' && entry.message.includes('Future system date detected')) {
+      return undefined;
+    }
+    
+    // Skip "Found X tweets for account" messages as they're redundant
+    if (entry.component === 'Main' && entry.message.match(/Found \d+ tweets for account/)) {
+      return undefined;
+    }
+    
+    // In quiet mode, only show important messages
+    if (this.quietMode) {
+      // Always show startup messages
+      const isStartupMessage =
+        entry.message.includes('Starting') ||
+        entry.message.includes('Initializing') ||
+        entry.message.includes('Configuration loaded') ||
+        entry.message.includes('Connected to');
+      
+      // Always show cycle start/end messages
+      const isCycleMessage =
+        entry.message.includes('[CYCLE') ||
+        entry.message.includes('cycle started') ||
+        entry.message.includes('cycle completed');
+      
+      // Always show search execution messages
+      const isSearchMessage =
+        entry.message.includes('[SEARCH]') ||
+        entry.message.includes('Searching');
+      
+      // Always show tweet found/not found messages
+      const isTweetFoundMessage =
+        entry.message.includes('[TWEET FOUND]') ||
+        entry.message.includes('[TWEET PROCESSING SUCCESS]');
+      
+      // Always show rate limit messages
+      const isRateLimitMessage =
+        entry.message.includes('Rate limit') ||
+        entry.message.includes('rate limit');
+      
+      // Always show error messages
+      const isErrorMessage = entry.level === 0;
+      
+      // Skip messages that don't match our criteria in quiet mode
+      if (!isStartupMessage && !isCycleMessage && !isSearchMessage &&
+          !isTweetFoundMessage && !isRateLimitMessage && !isErrorMessage) {
+        return undefined;
+      }
+    }
     
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
@@ -119,6 +258,16 @@ export class ConsoleTransport implements LogTransport {
     if (component === 'Main') {
       if (entry.message.includes('Processing tweet') && entry.message.includes('for topic')) return undefined;
       if (entry.message.includes('does not match filters for topic')) return undefined;
+    }
+    
+    // Process tweet rejection messages
+    if (component === 'Main' && entry.message.includes('[TWEET PROCESSING REJECTED]')) {
+      const tweetIdMatch = entry.message.match(/Tweet (\d+) from @([^\s]+)/);
+      if (tweetIdMatch) {
+        const username = tweetIdMatch[2];
+        this.addRejection('time window', username);
+        return undefined; // Skip individual rejection messages
+      }
     }
     
     // Special formatting for TelegramMessageSender logs
@@ -174,6 +323,16 @@ export class ConsoleTransport implements LogTransport {
       }
     }
     
+    // Color-code search-related messages
+    if (entry.message && entry.message.includes('[SEARCH]')) {
+      entry.message = entry.message.replace('[SEARCH]', this.getSearchTypeTag());
+    }
+    
+    // Color-code search result messages
+    if (entry.message && entry.message.includes('[SEARCH RESULT]')) {
+      entry.message = entry.message.replace('[SEARCH RESULT]', this.getSearchTypeTag());
+    }
+    
     // Special formatting for tweet search summary
     if (entry.data && entry.message.includes('Found') && entry.message.includes('tweets in search') && entry.data.status === 'TWEETS_FOUND_SUMMARY') {
       const searchId = entry.data?.searchId || '';
@@ -191,7 +350,7 @@ export class ConsoleTransport implements LogTransport {
       return this.formatter.formatLogComponents({
         timestamp: String(timestamp),
         component: String(component),
-        message: `${this.formatter.cyan('[SEARCH]')} ${entry.message} ${ageDistStr ? `(${ageDistStr})` : ''}`
+        message: `${this.getSearchTypeTag()} ${entry.message} ${ageDistStr ? `(${ageDistStr})` : ''}`
       });
     }
 
@@ -238,7 +397,8 @@ export class ConsoleTransport implements LogTransport {
       .replace(/\[BATCH SUMMARY\]/g, this.formatter.bold('[BATCH SUMMARY]'))
       .replace(/\[PIPELINE START\]/g, this.formatter.bold('[PIPELINE START]'))
       .replace(/\[PIPELINE ✓\]/g, this.formatter.green('[PIPELINE ✓]'))
-      .replace(/\[PIPELINE ✗\]/g, this.formatter.red('[PIPELINE ✗]'));
+      .replace(/\[PIPELINE ✗\]/g, this.formatter.red('[PIPELINE ✗]'))
+      .replace(/\[TWEET PROCESSING SUCCESS\]/g, this.formatter.green('[TWEET FOUND]'));
 
     const baseMessage = this.formatter.formatLogComponents({
       timestamp: String(timestamp),
@@ -334,7 +494,7 @@ export class FileTransport implements LogTransport {
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
     
-    // Skip component tag for TweetProcessor logs
+    // Format the log message
     let message = `[${timestamp}] [${level}]${component !== 'TweetProcessor' ? ` [${component}]` : ''}${correlationId} ${entry.message}`;
     
     if (entry.data && Object.keys(entry.data).length > 0) {

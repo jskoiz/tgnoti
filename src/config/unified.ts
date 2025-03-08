@@ -73,32 +73,39 @@ export interface UnifiedConfig {
 // Convert existing topic config to new format
 function convertTopicConfig(): TopicConfig[] {
   const topicMap = new Map<number, TopicConfig>();
-  
+
   // Convert from TOPIC_CONFIG
   for (const [name, details] of Object.entries(TOPIC_CONFIG)) {
     const userFilters = details.filters
       .filter(f => f.type === 'user')
       .map(f => f.value);
-      
+
     const mentionFilters = details.filters
       .filter(f => f.type === 'mention')
       .map(f => f.value);
-      
+
     const keywordFilters = details.filters
       .filter(f => f.type === 'keyword')
       .map(f => f.value);
-    
-    const topic: TopicConfig = {
+
+    // Create a more intuitive topic configuration
+    let topic: TopicConfig = {
       id: details.id,
       name,
       accounts: userFilters,
       mentions: mentionFilters.length > 0 ? mentionFilters : undefined,
       keywords: keywordFilters.length > 0 ? keywordFilters : undefined
     };
-    
+
+    // For KOL_MONITORING, ensure we're explicitly setting up to monitor tweets FROM these accounts
+    if (name === 'KOL_MONITORING') {
+      // Log the KOL accounts we're monitoring for clarity
+      console.log(`KOL_MONITORING configured to track tweets FROM: ${userFilters.join(', ')}`);
+    }
+
     topicMap.set(details.id, topic);
   }
-  
+
   return Array.from(topicMap.values());
 }
 

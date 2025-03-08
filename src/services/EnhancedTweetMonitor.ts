@@ -122,28 +122,32 @@ export class EnhancedTweetMonitor {
   private createAccountBatches(): void {
     const topics = this.config.getTopics();
     const batchSize = this.config.getSystemConfig().tweetBatchSize || 10;
-    
+
     for (const topic of topics) {
-      // For topics with mentions (like COMPETITOR_MENTIONS), use the mentions as accounts
-      // Otherwise, use the accounts array
       let accounts: string[] = [];
       let accountSource = "accounts";
-      
-      if (topic.name === 'COMPETITOR_MENTIONS' && topic.mentions && topic.mentions.length > 0) {
-        this.logger.info(`Using mentions as accounts for topic ${topic.name} (${topic.id})`);
+
+      // Simplified logic for determining which accounts to search for
+      if (topic.name === 'KOL_MONITORING') {
+        // For KOL_MONITORING, we want tweets FROM these accounts
+        accounts = [...topic.accounts];
+        accountSource = "accounts (KOL users)";
+      } else if (topic.name === 'COMPETITOR_MENTIONS' && topic.mentions && topic.mentions.length > 0) {
+        // For COMPETITOR_MENTIONS, we want tweets that MENTION these accounts
         accounts = [...topic.mentions];
-        accountSource = "mentions";
+        accountSource = "mentions (competitors)";
       } else {
+        // Default case - use accounts array
         accounts = [...topic.accounts];
       }
-      
+
       const accountCount = accounts.length;
       const batches: string[][] = [];
-      
+
       while (accounts.length > 0) {
         batches.push(accounts.splice(0, batchSize));
       }
-      
+
       this.accountBatches.set(topic.id, batches);
       this.logger.info(`Created ${batches.length} batches for topic ${topic.name} (${topic.id}) with ${accountCount} ${accountSource}`);
     }
@@ -295,7 +299,8 @@ export class EnhancedTweetMonitor {
       
       const duration = Date.now() - startTime;
       
-      this.logger.info(`Search cycle complete: ${totalTweets} tweets found, ${processedTweets} processed in ${duration}ms`);
+      // Add [CYCLE COMPLETE] marker for enhanced visibility in logs
+      this.logger.info(`[CYCLE COMPLETE] Search cycle finished: ${totalTweets} tweets found, ${processedTweets} processed in ${duration}ms`, { status: 'CYCLE_COMPLETE' });
       this.metrics.timing('monitor.cycle_duration', duration);
       this.metrics.gauge('monitor.tweets_found', totalTweets);
       this.metrics.gauge('monitor.tweets_processed', processedTweets);
@@ -376,10 +381,31 @@ export class EnhancedTweetMonitor {
   private async processAccountBatch(accounts: string[], topic: any, searchStartTime: Date): Promise<[number, number]> {
     let totalTweetsFound = 0;
     let totalTweetsProcessed = 0;
-    
-    // Determine search type based on topic name
-    const searchType = topic.name === 'COMPETITOR_MENTIONS' ? 'mention' : 'from';
-    
+
+    // Simplified and more explicit search type determination
+    let searchType: 'from' | 'mention';
+    if (topic.name === 'KOL_MONITORING') {
+      // For KOL_MONITORING, we explicitly want tweets FROM these accounts
+      searchType = 'from';
+      this.logger.info(`[SRCH] KOL_MONITORING: Searching for tweets FROM accounts: ${accounts.join(', ')}`);
+      
+      // Add extra logging for KOL_MONITORING to help debug the issue
+      this.logger.debug(`KOL_MONITORING search details:`, {
+        topicId: topic.id,
+        accountCount: accounts.length,
+        searchWindow: `${searchStartTime.toISOString()} to ${new Date().toISOString()}`,
+        searchType: 'from'
+      });
+    } else if (topic.name === 'COMPETITOR_MENTIONS') {
+      // For COMPETITOR_MENTIONS, we want tweets that MENTION these accounts
+      searchType = 'mention';
+      this.logger.info(`[SRCH] COMPETITOR_MENTIONS: Searching for tweets MENTIONING accounts: ${accounts.join(', ')}`);
+    } else {
+      // Default behavior based on topic configuration
+      searchType = topic.mentions && topic.mentions.length > 0 ? 'mention' : 'from';
+      this.logger.info(`[SRCH] Topic ${topic.name}: Searching for tweets ${searchType === 'from' ? 'FROM' : 'MENTIONING'} accounts: ${accounts.join(', ')}`);
+    }
+
     for (const account of accounts) {
       // Check if we're in a global cooldown period before processing each account
       if (this.rettiwtErrorHandler.isInCooldown()) {

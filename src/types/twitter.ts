@@ -160,7 +160,8 @@ export interface SearchQueryConfig {
   type: 'structured';
   searchId?: string;  // ID of the search operation for tracking
   keywords?: string[];
-  accounts?: string[];
+  accounts?: string[];  // For backward compatibility
+  fromUsers?: string[]; // For tweets authored by these users (direct mapping to Rettiwt API)
   mentions?: string[];
   language: string;
   startTime?: string;

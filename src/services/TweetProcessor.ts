@@ -28,10 +28,11 @@ export class TweetProcessor {
     
     try {
       // Use debug level for individual tweet processing logs
-      this.logger.debug(`Processing tweet ${tweetId} from @${username} for topic ${topic.name} (${topicId})`);
+      this.logger.info(`[TWEET PROCESSING START] Processing tweet ${tweetId} from @${username} for topic ${topic.name} (${topicId})`);
       
       // 1. Check if tweet is already processed (duplicate check)
       if (await this.isDuplicate(tweet, topicId)) {
+        this.logger.info(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} is a duplicate`);
         return false;
       }
       
@@ -41,6 +42,7 @@ export class TweetProcessor {
           this.config.getTwitterConfig().searchWindow.windowMinutes || 60;
         this.logger.debug(`Tweet ${tweetId} from @${username} outside time window of ${windowMinutes} minutes`);
         this.metrics.increment('tweets.age_validation.failed');
+        this.logger.info(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} outside time window`);
         return false;
       } else {
         const windowMinutes = topic.searchWindowMinutes || 
@@ -55,6 +57,7 @@ export class TweetProcessor {
       if (!this.validateTweet(tweet)) {
         this.logger.debug(`Tweet ${tweetId} from @${username} failed validation`);
         this.metrics.increment('tweets.validation.failed');
+        this.logger.info(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} failed validation`);
         return false;
       }
       
@@ -62,6 +65,7 @@ export class TweetProcessor {
       if (!this.matchesTopicFilters(tweet, topic)) {
         this.logger.debug(`Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
         this.metrics.increment('tweets.filter.failed');
+        this.logger.info(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
         return false;
       }
       
@@ -75,14 +79,14 @@ export class TweetProcessor {
       await this.storage.storeTweet(tweet, topicId);
       
       const processingTime = Date.now() - startTime;
-      this.logger.info(`Processed tweet ${tweetId} from @${username} for topic ${topic.name}`);
+      this.logger.info(`[TWEET PROCESSING SUCCESS] Processed tweet ${tweetId} from @${username} for topic ${topic.name} in ${processingTime}ms`);
       this.metrics.timing('tweets.processing.duration', processingTime);
       this.metrics.increment('tweets.processed');
       
       return true;
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      this.logger.error(`Error processing tweet ${tweetId} from @${username} for topic ${topic.name}:`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`[TWEET PROCESSING ERROR] Error processing tweet ${tweetId} from @${username} for topic ${topic.name}:`, error instanceof Error ? error : new Error(String(error)));
       this.metrics.increment('tweets.processing.error');
       this.metrics.timing('tweets.processing.error_duration', processingTime);
       return false;
@@ -93,8 +97,10 @@ export class TweetProcessor {
     const isDuplicate = await this.storage.hasSeen(tweet.id, topicId);
     
     if (isDuplicate) {
-      this.logger.debug(`Tweet ${tweet.id} from @${tweet.tweetBy?.userName || 'unknown'} is a duplicate`);
+      this.logger.info(`Tweet ${tweet.id} from @${tweet.tweetBy?.userName || 'unknown'} is a duplicate for topic ${topicId}`);
       this.metrics.increment('tweets.duplicate');
+    } else {
+      this.logger.info(`Tweet ${tweet.id} from @${tweet.tweetBy?.userName || 'unknown'} is NOT a duplicate for topic ${topicId}`);
     }
     
     return isDuplicate;
@@ -109,6 +115,8 @@ export class TweetProcessor {
     const now = new Date();
     const tweetTimestamp = tweetDate.getTime();
     
+    this.logger.info(`Time window check for tweet ${tweet.id} from @${tweet.tweetBy?.userName || 'unknown'}: Tweet date: ${tweetDate.toISOString()}, System date: ${now.toISOString()}, Window: ${actualWindowMinutes} minutes`);
+    
     // Check if system date appears to be in the future (2025 or later)
     const systemYearInFuture = now.getFullYear() >= 2025;
     
@@ -121,7 +129,7 @@ export class TweetProcessor {
       isWithin = (now.getTime() - tweetTimestamp) <= windowMs;
       const diffMinutes = (now.getTime() - tweetTimestamp) / (1000 * 60);
       
-      this.logger.debug(`Future system date detected. Tweet age: ${diffMinutes.toFixed(2)} minutes, window: ${actualWindowMinutes} minutes, result: ${isWithin ? 'passed' : 'failed'}`);
+      this.logger.info(`Future system date detected. Tweet age: ${diffMinutes.toFixed(2)} minutes, window: ${actualWindowMinutes} minutes, result: ${isWithin ? 'passed' : 'failed'}`);
     } else {
       // Normal case - system date is reasonable
       const diffMs = now.getTime() - tweetDate.getTime();
@@ -129,7 +137,7 @@ export class TweetProcessor {
       isWithin = diffMinutes <= actualWindowMinutes;
       
       if (!isWithin) {
-        this.logger.debug(`Tweet age validation failed: ${diffMinutes.toFixed(2)} minutes old, window: ${actualWindowMinutes} minutes`);
+        this.logger.info(`Tweet age validation failed: ${diffMinutes.toFixed(2)} minutes old, window: ${actualWindowMinutes} minutes`);
       }
     }
     
@@ -160,24 +168,32 @@ export class TweetProcessor {
   private matchesTopicFilters(tweet: Tweet, topic: TopicConfig): boolean {
     const username = tweet.tweetBy?.userName?.toLowerCase();
     if (!username) return false;
+
+    this.logger.info(`Checking if tweet ${tweet.id} from @${username} matches filters for topic ${topic.name} (${topic.id})`);
+    if (topic.accounts) {
+      this.logger.info(`Topic ${topic.name} has ${topic.accounts.length} accounts: ${topic.accounts.join(', ')}`);
+    }
     
     // Check if tweet is from one of the monitored accounts
     if (topic.accounts && topic.accounts.some(account => 
       account.toLowerCase() === username)) {
       this.logger.debug(`Tweet from @${username} matches account filter for topic ${topic.name}`);
       this.metrics.increment('tweets.filter.match.user');
+      this.logger.info(`Tweet from @${username} MATCHES account filter for topic ${topic.name}`);
       return true;
     }
     
     // Check if tweet mentions one of the monitored accounts
     if (topic.mentions && tweet.entities?.mentionedUsers) {
       this.logger.debug(`Checking ${tweet.entities.mentionedUsers.length} mentions for topic ${topic.name}`);
+      this.logger.info(`Checking ${tweet.entities.mentionedUsers.length} mentions for topic ${topic.name}: ${tweet.entities.mentionedUsers.join(', ')}`);
       const hasMention = tweet.entities.mentionedUsers.some(mention => 
         topic.mentions!.some(account => 
           account.toLowerCase() === mention.toLowerCase()));
       
       if (hasMention) {
         this.logger.debug(`Tweet from @${username} matches mention filter for topic ${topic.name}`);
+        this.logger.info(`Tweet from @${username} MATCHES mention filter for topic ${topic.name}`);
         this.metrics.increment('tweets.filter.match.mention');
         return true;
       }
@@ -186,18 +202,20 @@ export class TweetProcessor {
     // Check for keywords
     if (topic.keywords && tweet.text) {
       this.logger.debug(`Checking ${topic.keywords.length} keywords for topic ${topic.name}`);
+      this.logger.info(`Checking ${topic.keywords.length} keywords for topic ${topic.name}: ${topic.keywords.join(', ')}`);
       const tweetText = tweet.text.toLowerCase();
       const hasKeyword = topic.keywords.some(keyword => 
         tweetText.includes(keyword.toLowerCase()));
       
       if (hasKeyword) {
         this.logger.debug(`Tweet from @${username} matches keyword filter for topic ${topic.name}`);
+        this.logger.info(`Tweet from @${username} MATCHES keyword filter for topic ${topic.name}`);
         this.metrics.increment('tweets.filter.match.keyword');
         return true;
       }
     }
     
-    this.logger.debug(`Tweet from @${username} does NOT match any filters for topic ${topic.name}`);
+    this.logger.info(`Tweet from @${username} does NOT match any filters for topic ${topic.name}`);
     return false;
   }
   
