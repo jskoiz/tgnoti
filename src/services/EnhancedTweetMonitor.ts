@@ -121,7 +121,17 @@ export class EnhancedTweetMonitor {
    */
   private createAccountBatches(): void {
     const topics = this.config.getTopics();
-    const batchSize = this.config.getSystemConfig().tweetBatchSize || 10;
+    const systemConfig = this.config.getSystemConfig();
+    
+    // Get batch size from config, with a configurable maximum for optimal performance
+    const maxBatchSize = systemConfig.maxBatchSize || 10; // Default to 10 if not set
+    const configuredBatchSize = systemConfig.tweetBatchSize || 50;
+    
+    // Use the smaller of the configured batch size or the maximum batch size
+    // This ensures we don't exceed the recommended limit for reliable results
+    const batchSize = Math.min(configuredBatchSize, maxBatchSize);
+    
+    this.logger.info(`Using batch size of ${batchSize} accounts per query (max configured: ${maxBatchSize})`);
 
     for (const topic of topics) {
       let accounts: string[] = [];
@@ -144,12 +154,25 @@ export class EnhancedTweetMonitor {
       const accountCount = accounts.length;
       const batches: string[][] = [];
 
+      // Create batches of accounts, respecting the batch size limit
       while (accounts.length > 0) {
         batches.push(accounts.splice(0, batchSize));
       }
 
       this.accountBatches.set(topic.id, batches);
-      this.logger.info(`Created ${batches.length} batches for topic ${topic.name} (${topic.id}) with ${accountCount} ${accountSource}`);
+      
+      // Enhanced logging for better visibility of batching
+      if (batches.length > 1) {
+        this.logger.info(`Created ${batches.length} batches for topic ${topic.name} (${topic.id}) with ${accountCount} ${accountSource}`);
+        this.logger.debug(`Batch details for ${topic.name}:`, {
+          totalAccounts: accountCount,
+          batchCount: batches.length,
+          batchSize: batchSize,
+          accountsInLastBatch: batches[batches.length - 1].length
+        });
+      } else {
+        this.logger.info(`Created 1 batch for topic ${topic.name} (${topic.id}) with ${accountCount} ${accountSource}`);
+      }
     }
   }
   
@@ -328,7 +351,7 @@ export class EnhancedTweetMonitor {
       const overlapMs = twitterConfig.searchWindow.overlapBufferMinutes * 60 * 1000;
       searchStartTime = new Date(this.lastPollTimes.get(topicKey)!.getTime() - overlapMs);
     } else {
-      const defaultWindowMinutes = topic.searchWindowMinutes || 
+      const defaultWindowMinutes = topic.searchWindowMinutes ||
         this.config.getTwitterConfig().searchWindow.windowMinutes;
       searchStartTime = new Date(Date.now() - (defaultWindowMinutes * 60 * 1000));
     }
@@ -348,11 +371,24 @@ export class EnhancedTweetMonitor {
       return [0, 0];
     }
     
+    // Log batch information for KOL_MONITORING to highlight the automatic batching
+    if (topic.name === 'KOL_MONITORING' && batches.length > 1) {
+      this.logger.info(`KOL_MONITORING accounts automatically split into ${batches.length} batches for optimal performance`);
+    }
+    
     // Process each batch
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
       
       try {
+        // Add delay between batches to respect rate limits, but only if not the first batch
+        if (batchIndex > 0) {
+          const twitterConfig = this.config.getTwitterConfig();
+          const batchDelayMs = Math.max(2000, Math.min(twitterConfig.rateLimit.topicDelayMs / 2, 5000));
+          this.logger.debug(`Adding ${batchDelayMs}ms delay between batches for topic ${topic.name}`);
+          await new Promise(resolve => setTimeout(resolve, batchDelayMs));
+        }
+        
         this.logger.info(`Processing batch ${batchIndex + 1}/${batches.length} for topic ${topic.name} (${batch.length} accounts)`);
         
         const [tweetsFound, tweetsProcessed] = await this.processAccountBatch(batch, topic, searchStartTime);
@@ -365,7 +401,20 @@ export class EnhancedTweetMonitor {
         const err = error instanceof Error ? error : new Error(String(error));
         this.logger.error(`Error processing batch ${batchIndex + 1}/${batches.length} for topic ${topic.name}:`, err);
         this.metrics.incrementForTopic(`${topic.id}`, 'batch_errors', 1);
+        
+        // If we encounter an error with a batch, add a longer delay before the next batch
+        // to help avoid cascading failures
+        if (batchIndex < batches.length - 1) {
+          const errorDelayMs = 10000; // 10 seconds
+          this.logger.info(`Adding ${errorDelayMs}ms delay after batch error before processing next batch`);
+          await new Promise(resolve => setTimeout(resolve, errorDelayMs));
+        }
       }
+    }
+    
+    // Log summary for multi-batch processing
+    if (batches.length > 1) {
+      this.logger.info(`Completed processing ${batches.length} batches for topic ${topic.name}: ${totalTweetsFound} tweets found, ${totalTweetsProcessed} processed`);
     }
     
     return [totalTweetsFound, totalTweetsProcessed];
@@ -382,7 +431,7 @@ export class EnhancedTweetMonitor {
     let totalTweetsFound = 0;
     let totalTweetsProcessed = 0;
 
-    // Simplified and more explicit search type determination
+    // Determine search type based on topic
     let searchType: 'from' | 'mention';
     if (topic.name === 'KOL_MONITORING') {
       // For KOL_MONITORING, we explicitly want tweets FROM these accounts
@@ -406,57 +455,59 @@ export class EnhancedTweetMonitor {
       this.logger.info(`[SRCH] Topic ${topic.name}: Searching for tweets ${searchType === 'from' ? 'FROM' : 'MENTIONING'} accounts: ${accounts.join(', ')}`);
     }
 
-    for (const account of accounts) {
-      // Check if we're in a global cooldown period before processing each account
-      if (this.rettiwtErrorHandler.isInCooldown()) {
-        const remainingCooldown = Math.ceil(this.rettiwtErrorHandler.getRemainingCooldown() / 1000);
-        this.logger.warn(`[RATE LIMIT PROTECTION] Skipping account ${account} due to global rate limit cooldown (${remainingCooldown}s remaining)`);
-        this.metrics.incrementForAccount(account, 'rate_limit_skips', 1);
-        
-        // Skip to the next account if we're in cooldown
-        // We don't need to process any more accounts if we're in cooldown
-        continue;
+    // Check for rate limit cooldown
+    if (this.rettiwtErrorHandler.isInCooldown()) {
+      const remainingCooldown = Math.ceil(this.rettiwtErrorHandler.getRemainingCooldown() / 1000);
+      this.logger.warn(`[RATE LIMIT PROTECTION] Skipping batch for topic ${topic.name} due to global rate limit cooldown (${remainingCooldown}s remaining)`);
+      return [0, 0];
+    }
+
+    try {
+      // Add delay for rate limiting
+      await this.rateLimiter.acquireRateLimit('twitter', topic.name);
+      
+      this.logger.info(`Searching tweets for ${accounts.length} accounts in batch: ${accounts.join(', ')}`);
+      
+      // Use circuit breaker for Twitter API calls
+      const twitterCB = this.circuitBreakers.get('twitter_api')!;
+      
+      // OPTIMIZED: Use a single search for all accounts in the batch
+      const tweets = await twitterCB.execute(
+        async () => {
+          // Create a combined search for all accounts
+          if (searchType === 'from') {
+            return this.twitter.searchTweetsFromUsers(accounts, searchStartTime);
+          } else {
+            return this.twitter.searchTweetsMentioningUsers(accounts, searchStartTime);
+          }
+        },
+        `search:${topic.name}:batch`
+      );
+      
+      this.logger.info(`Found ${tweets.length} tweets for batch of ${accounts.length} accounts`);
+      totalTweetsFound += tweets.length;
+      
+      // Process tweets
+      for (const tweet of tweets) {
+        const processed = await this.processor.processTweet(tweet, topic);
+        if (processed) {
+          totalTweetsProcessed++;
+        }
       }
       
-      try {
-        // Add delay between accounts to respect rate limits
-        await this.rateLimiter.acquireRateLimit('twitter', account);
-        
-        this.logger.info(`Searching tweets for account: ${account}`);
-        
-        // Use circuit breaker for Twitter API calls
-        const twitterCB = this.circuitBreakers.get('twitter_api')!;
-        
-        const tweets = await twitterCB.execute(
-          async () => this.twitter.searchTweets(account, searchStartTime, searchType),
-          `search:${account}`
-        );
-        
-        this.logger.info(`Found ${tweets.length} tweets for account ${account}`);
-        totalTweetsFound += tweets.length;
-        
-        this.metrics.gaugeForAccount(account, 'tweets_found', tweets.length);
-        
-        for (const tweet of tweets) {
-          const processed = await this.processor.processTweet(tweet, topic);
-          if (processed) {
-            totalTweetsProcessed++;
-            this.metrics.incrementForAccount(account, 'tweets_processed', 1);
-          }
-        }
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        this.logger.error(`Error processing account ${account}:`, err);
-        this.metrics.increment('monitor.account_errors');
-        this.metrics.incrementForAccount(account, 'errors', 1);
-        
-        // Check if it's a rate limit error
-        const errorMessage = err.message.toLowerCase();
-        if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
-          this.rateLimiter.handleRateLimitError('twitter', account);
-        }
-        
-        // Continue with next account
+      // Update metrics for each account in the batch
+      for (const account of accounts) {
+        this.metrics.gaugeForAccount(account, 'tweets_found', tweets.length / accounts.length); // Approximate
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Error processing batch for topic ${topic.name}:`, err);
+      this.metrics.increment('monitor.batch_errors');
+      
+      // Check if it's a rate limit error
+      const errorMessage = err.message.toLowerCase();
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+        this.rateLimiter.handleRateLimitError('twitter', topic.name);
       }
     }
     

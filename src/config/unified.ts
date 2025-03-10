@@ -59,6 +59,7 @@ export interface MongoDBConfig {
 export interface SystemConfig {
   tweetCleanupAgeDays: number;
   tweetBatchSize: number;
+  maxBatchSize: number;
   logLevel: string;
 }
 
@@ -166,6 +167,7 @@ export function loadConfig(): UnifiedConfig {
     system: {
       tweetCleanupAgeDays: Number(process.env.TWEET_CLEANUP_AGE_DAYS) || 7,
       tweetBatchSize: Number(process.env.TWEET_BATCH_SIZE) || 50,
+      maxBatchSize: Number(process.env.MAX_BATCH_SIZE) || 10,
       logLevel: process.env.LOG_LEVEL || 'info'
     }
   };

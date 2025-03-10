@@ -122,4 +122,133 @@ export class TwitterService {
       throw error;
     }
   }
+
+  /**
+   * Search for tweets from multiple users in a single query
+   * @param accounts Array of accounts to search for tweets from
+   * @param since The date to search from
+   * @returns An array of tweets
+   */
+  async searchTweetsFromUsers(accounts: string[], since: Date): Promise<Tweet[]> {
+    const startTime = Date.now();
+    this.metrics.increment('twitter.batch_search_requests');
+
+    try {
+      const sinceStr = since.toISOString();
+      this.logger.info(`[BATCH SEARCH] Looking for tweets AUTHORED BY ${accounts.length} accounts since ${sinceStr}`);
+      this.logger.debug(`Accounts in batch: ${accounts.join(', ')}`);
+
+      // Search parameters for tweets FROM multiple users
+      const searchParams: any = {
+        fromUsers: accounts,
+        startDate: since,
+        endDate: new Date(),
+        language: 'en',
+        maxResults: 100,
+        replies: true,
+        advancedFilters: {
+          include_replies: true,
+          fromUsers: accounts // Redundant but ensures compatibility
+        }
+      };
+
+      const searchResponse = await this.client.searchTweets(searchParams);
+      const tweets = searchResponse.data;
+      
+      // Filter to ensure we only get tweets FROM the specified users
+      const targetUsernames = accounts.map(account => account.toLowerCase().replace('@', ''));
+      
+      // Log all tweets before filtering for debugging
+      if (tweets.length > 0) {
+        this.logger.debug(`Pre-filter tweets (${tweets.length}):`);
+        tweets.forEach((tweet, idx) => {
+          const tweetUsername = tweet.tweetBy.userName.toLowerCase().replace('@', '');
+          const isMatch = targetUsernames.includes(tweetUsername);
+          this.logger.debug(`Tweet ${idx+1}: ID=${tweet.id}, by @${tweet.tweetBy.userName}, match=${isMatch}`);
+        });
+      }
+      
+      // Filter tweets to only include those from the specified users
+      const filteredTweets = tweets.filter(tweet => {
+        const tweetUsername = tweet.tweetBy.userName.toLowerCase().replace('@', '');
+        return targetUsernames.includes(tweetUsername);
+      });
+      
+      if (filteredTweets.length !== tweets.length) {
+        this.logger.warn(`Filtered out ${tweets.length - filteredTweets.length} tweets that were not authored by the specified accounts`);
+      }
+
+      // Sort tweets by creation date (newest first)
+      filteredTweets.sort((a: Tweet, b: Tweet) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+
+      const duration = Date.now() - startTime;
+      this.logger.info(`[BATCH SEARCH RESULT] Found ${filteredTweets.length} tweets from ${accounts.length} accounts in ${duration}ms`);
+      
+      this.metrics.timing('twitter.batch_search_duration', duration);
+      this.metrics.gauge('twitter.batch_tweets_found', filteredTweets.length);
+
+      return filteredTweets;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`Error searching tweets from multiple accounts:`, error instanceof Error ? error : new Error(String(error)));
+      this.metrics.increment('twitter.batch_search_errors');
+      this.metrics.timing('twitter.batch_error_duration', duration);
+      throw error;
+    }
+  }
+
+  /**
+   * Search for tweets mentioning multiple users in a single query
+   * @param accounts Array of accounts to search for mentions of
+   * @param since The date to search from
+   * @returns An array of tweets
+   */
+  async searchTweetsMentioningUsers(accounts: string[], since: Date): Promise<Tweet[]> {
+    const startTime = Date.now();
+    this.metrics.increment('twitter.batch_mention_requests');
+
+    try {
+      const sinceStr = since.toISOString();
+      this.logger.info(`[BATCH SEARCH] Looking for tweets MENTIONING ${accounts.length} accounts since ${sinceStr}`);
+      this.logger.debug(`Accounts in batch: ${accounts.join(', ')}`);
+
+      // Search parameters for tweets MENTIONING multiple users
+      const searchParams: any = {
+        mentions: accounts,
+        startDate: since,
+        endDate: new Date(),
+        language: 'en',
+        maxResults: 100,
+        replies: true
+      };
+
+      const searchResponse = await this.client.searchTweets(searchParams);
+      const tweets = searchResponse.data;
+
+      // Sort tweets by creation date (newest first)
+      tweets.sort((a: Tweet, b: Tweet) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+
+      const duration = Date.now() - startTime;
+      this.logger.info(`[BATCH SEARCH RESULT] Found ${tweets.length} tweets mentioning ${accounts.length} accounts in ${duration}ms`);
+      
+      this.metrics.timing('twitter.batch_mention_duration', duration);
+      this.metrics.gauge('twitter.batch_mention_found', tweets.length);
+
+      return tweets;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`Error searching tweets mentioning multiple accounts:`, error instanceof Error ? error : new Error(String(error)));
+      this.metrics.increment('twitter.batch_mention_errors');
+      this.metrics.timing('twitter.batch_mention_error_duration', duration);
+      throw error;
+    }
+  }
 }
