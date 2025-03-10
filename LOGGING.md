@@ -6,12 +6,16 @@ This document describes the enhanced logging system implemented in the Twitter N
 
 ### 1. Visual Distinction for Log Levels
 
-Log levels are now visually distinct with color coding:
-- **ERROR**: Red background
+Log levels are now visually distinct with enhanced color coding:
+- **ERROR**: Red text
 - **WARN**: Yellow text
 - **INFO**: White text
 - **DEBUG**: Blue text
-- **SUCCESS/FAILURE**: Green/Red status indicators
+- **SUCCESS**: Bright green status indicators
+- **FAILURE**: Bright red status indicators
+- **SEARCH**: Bright cyan for search operations
+- **BATCH**: Bold cyan for batch operations
+- **CYCLE**: Bold bright cyan for cycle completion
 
 ### 2. Grouped Related Log Entries
 
@@ -59,6 +63,10 @@ Logs are categorized with prefixes for easier filtering:
 - `[PROC]` - Tweet processor logs
 - `[SRCH]` - Search-related logs
 - `[VALD]` - Validation logs
+- `[KOL]` - KOL monitoring logs (green)
+- `[MENTIONS]` - Competitor mentions logs (yellow)
+- `[TWEETS]` - Competitor tweets logs (blue)
+- `[REJECTED]` - Rejected tweets (red)
 
 ### 8. Real-Time Dashboard
 
@@ -78,6 +86,21 @@ npm run dashboard
 # Or use the log viewer with dashboard
 npm run log-viewer
 ```
+
+## Quiet Mode
+
+The logging system supports a quiet mode that significantly reduces log volume by only showing important messages. This is enabled by setting `QUIET_LOGGING=true` in the `.env` file.
+
+In quiet mode, only the following types of messages are shown:
+- Startup and initialization messages
+- Topic processing start/end messages
+- Batch search results
+- Search execution messages at the topic level
+- Rate limit messages
+- Error messages
+- Cycle completion messages
+
+Individual tweet processing messages are logged at DEBUG level and filtered out in quiet mode, resulting in much cleaner logs that focus on the most important information.
 
 ## Configuration
 
@@ -112,6 +135,16 @@ Instead of logging each individual tweet found in a search, the system now provi
 ```
 
 This significantly reduces log volume while still providing useful information about the age distribution of found tweets.
+
+## Aggregated Rejection Messages
+
+Instead of logging each individual tweet rejection, the system now aggregates rejection messages and displays them as a single message with a count and list of affected usernames:
+
+```
+[14:51] [REJECTED] 16 tweets outside time window from @maestrobots, tradewithphoton, bonkbot_io and 1 more (time window)
+```
+
+This significantly reduces log volume while still providing useful information about rejected tweets.
 
 ## Filtering Rules
 

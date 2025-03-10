@@ -107,6 +107,31 @@ export class ColorFormatter {
   bgRed(text: string): string {
     return this.wrap(Colors.bgRed, text);
   }
+  
+  // Bright color methods
+  brightYellow(text: string): string {
+    return this.wrap(Colors.brightYellow, text);
+  }
+  
+  brightBlue(text: string): string {
+    return this.wrap(Colors.brightBlue, text);
+  }
+  
+  brightCyan(text: string): string {
+    return this.wrap(Colors.brightCyan, text);
+  }
+  
+  brightGreen(text: string): string {
+    return this.wrap(Colors.brightGreen, text);
+  }
+  
+  brightRed(text: string): string {
+    return this.wrap(Colors.brightRed, text);
+  }
+  
+  magenta(text: string): string {
+    return this.wrap(Colors.magenta, text);
+  }
 
   /**
    * Format text as a cycle completion marker with bright cyan and bold

@@ -35,6 +35,12 @@ export class ConsoleTransport implements LogTransport {
   private currentSearchType: string | null;
   private flushTimeoutId: NodeJS.Timeout | null = null;
   private readonly quietMode: boolean;
+  private recentMessages: Set<string> = new Set(); // Track recent messages to avoid duplicates
+  private static readonly DEDUP_PATTERNS = [
+    /Searching tweets for \d+ accounts in batch/,
+    /Searching for tweets (AUTHORED BY|MENTIONING):/,
+    /\[SEARCH\] \[BATCH\] Found \d+ tweets/
+  ];
   
   constructor(options: { useColors?: boolean; format?: 'json' | 'text'; quietMode?: boolean } = {}) {
     this.useColors = options.useColors ?? true;
@@ -44,9 +50,54 @@ export class ConsoleTransport implements LogTransport {
     // Initialize collections
     this.currentSearchType = null;
     this.pendingRejections = new Map();
+    
+    if (this.quietMode) {
+      console.log('ConsoleTransport initialized with quiet mode enabled');
+    }
   }
   
   log(entry: LogEntry): void {
+    // In quiet mode, only allow specific message patterns
+    if (this.quietMode) {
+      // Only allow specific message patterns in quiet mode
+      const allowedPatterns = [
+        'Starting',
+        'Initializing',
+        'Configuration loaded',
+        'Connected to',
+        'Service started',
+        '[CYCLE',
+        'cycle started',
+        'cycle completed',
+        'cycle finished',
+        'Processing topic',
+        'Topic.*processed:',
+        '[BATCH SEARCH RESULT]',
+        'Found.*tweets for batch',
+        '[SRCH].*Topic',
+        'Searching.*accounts:',
+        'Rate limit',
+        'rate limit',
+        '[REJECTED]',
+        // Add new patterns for standardized tags
+        '\\[TWEETS\\]',
+        '\\[MENTIONS\\]',
+        '\\[TROJAN\\]',
+        '\\[KOL\\]',
+        '\\[RESULT\\]'
+      ];
+      
+      // Check if the message matches any of the allowed patterns
+      const isAllowed = allowedPatterns.some(pattern =>
+        new RegExp(pattern).test(entry.message)
+      );
+      
+      // Skip messages that don't match any allowed pattern
+      if (!isAllowed && entry.level !== 0) { // Always show error messages
+        return; // Skip these messages entirely
+      }
+    }
+    
     // Add log category prefix based on component and message
     if (this.format === 'text' && !entry.message.startsWith('[')) {
       if (entry.component === 'TweetProcessor') entry.message = `[PROC] ${entry.message}`;
@@ -55,18 +106,30 @@ export class ConsoleTransport implements LogTransport {
       else if (entry.message.includes('search') || entry.message.includes('Search')) entry.message = `[SRCH] ${entry.message}`;
       else if (entry.message.includes('kol_monitoring')) {
         this.currentSearchType = 'kol';
-        entry.message = `[KOL] ${entry.message.replace('kol_monitoring', '')}`;
+        // Standardize KOL monitoring logs
+        entry.message = `[KOL] ${entry.message.replace('kol_monitoring', '').trim()}`;
       } else if (entry.message.includes('competitor_mentions')) {
         this.currentSearchType = 'mentions';
-        entry.message = `[MENTIONS] ${entry.message.replace('competitor_mentions', '')}`;
+        // Standardize mentions logs
+        entry.message = `[MENTIONS] ${entry.message.replace('competitor_mentions', '').trim()}`;
       } else if (entry.message.includes('competitor_tweets')) {
         this.currentSearchType = 'tweets';
-        entry.message = `[TWEETS] ${entry.message.replace('competitor_tweets', '')}`;
+        // Standardize tweets logs
+        entry.message = `[TWEETS] ${entry.message.replace('competitor_tweets', '').trim()}`;
+      } else if (entry.message.includes('trojan')) {
+        this.currentSearchType = 'trojan';
+        // Standardize trojan logs
+        entry.message = `[TROJAN] ${entry.message.replace('trojan', '').trim()}`;
       }
       else if (entry.message.includes('valid') || entry.message.includes('Valid')) entry.message = `[VALD] ${entry.message}`;
     }
     
-    const formatted = this.format === 'json' 
+    // Skip if component is 'Main' and we're just removing the tag
+    if (entry.component === 'Main' && this.format === 'text') {
+      entry.component = ''; // Remove the Main tag
+    }
+    
+    const formatted = this.format === 'json'
       ? JSON.stringify(entry)
       : this.formatText(entry);
     
@@ -104,7 +167,7 @@ export class ConsoleTransport implements LogTransport {
         const date = new Date();
         const timestamp = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
         
-        let message = `[${timestamp}] [Main] ${this.formatter.red('[REJECTED]')} ${data.count} tweets outside time window`;
+        let message = `[${timestamp}] ${this.formatter.red('[REJECTED]')} ${data.count} tweets outside time window`;
         if (usernames) {
           message += ` from @${usernames}${additionalCount}`;
         }
@@ -148,16 +211,18 @@ export class ConsoleTransport implements LogTransport {
       case 'kol':
         return this.formatter.green('[KOL]');
       case 'mentions':
-        return this.formatter.yellow('[MENTIONS]');
+        return this.formatter.brightYellow('[MENTIONS]');
       case 'tweets':
-        return this.formatter.blue('[TWEETS]');
+        return this.formatter.brightBlue('[TWEETS]');
+      case 'trojan':
+        return this.formatter.magenta('[TROJAN]');
       default:
-        return this.formatter.cyan('[SEARCH]');
+        return this.formatter.brightCyan('[SEARCH]');
     }
   }
   
   private formatText(entry: LogEntry): string | undefined {
-    // Format timestamp as [MM-DD HH:mm:ss] with color
+    // Format timestamp as [HH:MM] with color
     const date = new Date(entry.timestamp);
     // Simplified timestamp format (HH:MM)
     const timestamp = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
@@ -165,6 +230,30 @@ export class ConsoleTransport implements LogTransport {
     // Skip detailed time window check messages
     if (entry.component === 'Main' && entry.message.includes('Time window check for tweet')) {
       return undefined;
+    }
+    
+    // Standardize topic processing messages
+    if (entry.message.includes('Processing topic')) {
+      const topicMatch = entry.message.match(/Processing topic (\w+)/);
+      if (topicMatch && topicMatch[1]) {
+        const topicName = topicMatch[1];
+        switch (topicName) {
+          case 'COMPETITOR_TWEETS':
+            entry.message = entry.message.replace(`Processing topic ${topicName}`, this.formatter.blue(`[TWEETS] Processing ${topicName}`));
+            break;
+          case 'COMPETITOR_MENTIONS':
+            entry.message = entry.message.replace(`Processing topic ${topicName}`, this.formatter.brightYellow(`[MENTIONS] Processing ${topicName}`));
+            break;
+          case 'TROJAN':
+            entry.message = entry.message.replace(`Processing topic ${topicName}`, this.formatter.magenta(`[TROJAN] Processing ${topicName}`));
+            break;
+          case 'KOL_MONITORING':
+            entry.message = entry.message.replace(`Processing topic ${topicName}`, this.formatter.green(`[KOL] Processing ${topicName}`));
+            break;
+          default:
+            break;
+        }
+      }
     }
     
     // Skip "Future system date detected" messages
@@ -177,45 +266,7 @@ export class ConsoleTransport implements LogTransport {
       return undefined;
     }
     
-    // In quiet mode, only show important messages
-    if (this.quietMode) {
-      // Always show startup messages
-      const isStartupMessage =
-        entry.message.includes('Starting') ||
-        entry.message.includes('Initializing') ||
-        entry.message.includes('Configuration loaded') ||
-        entry.message.includes('Connected to');
-      
-      // Always show cycle start/end messages
-      const isCycleMessage =
-        entry.message.includes('[CYCLE') ||
-        entry.message.includes('cycle started') ||
-        entry.message.includes('cycle completed');
-      
-      // Always show search execution messages
-      const isSearchMessage =
-        entry.message.includes('[SEARCH]') ||
-        entry.message.includes('Searching');
-      
-      // Always show tweet found/not found messages
-      const isTweetFoundMessage =
-        entry.message.includes('[TWEET FOUND]') ||
-        entry.message.includes('[TWEET PROCESSING SUCCESS]');
-      
-      // Always show rate limit messages
-      const isRateLimitMessage =
-        entry.message.includes('Rate limit') ||
-        entry.message.includes('rate limit');
-      
-      // Always show error messages
-      const isErrorMessage = entry.level === 0;
-      
-      // Skip messages that don't match our criteria in quiet mode
-      if (!isStartupMessage && !isCycleMessage && !isSearchMessage &&
-          !isTweetFoundMessage && !isRateLimitMessage && !isErrorMessage) {
-        return undefined;
-      }
-    }
+    // Quiet mode filtering is now handled in the log method
     
     const component = entry.component;
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
@@ -234,6 +285,7 @@ export class ConsoleTransport implements LogTransport {
       });
     }
     
+    // Always filter out these verbose messages regardless of quiet mode
     // Filter out specific messages from TweetProcessor
     if (component === 'TweetProcessor') {
       if (entry.message.includes('Processing search window')) return undefined;
@@ -258,10 +310,24 @@ export class ConsoleTransport implements LogTransport {
     if (component === 'Main') {
       if (entry.message.includes('Processing tweet') && entry.message.includes('for topic')) return undefined;
       if (entry.message.includes('does not match filters for topic')) return undefined;
+      if (entry.message.includes('Time window check for tweet')) return undefined;
+      if (entry.message.includes('Future system date detected')) return undefined;
     }
     
-    // Process tweet rejection messages
-    if (component === 'Main' && entry.message.includes('[TWEET PROCESSING REJECTED]')) {
+    // Direct filtering of redundant messages
+    // Filter out [SEARCH] [BATCH] Found messages (keep only the [RESULT] ones with timing info)
+    if (entry.message.includes('[SEARCH] [BATCH] Found')) {
+      return undefined;
+    }
+    
+    // Filter out redundant "Searching for tweets AUTHORED BY/MENTIONING" messages
+    if (entry.message.includes('[SEARCH] Searching for tweets AUTHORED BY:') ||
+        entry.message.includes('[SEARCH] Searching for tweets MENTIONING:')) {
+      return undefined;
+    }
+    
+    // Process tweet rejection messages - always aggregate these
+    if (entry.message.includes('[TWEET PROCESSING REJECTED]')) {
       const tweetIdMatch = entry.message.match(/Tweet (\d+) from @([^\s]+)/);
       if (tweetIdMatch) {
         const username = tweetIdMatch[2];
@@ -333,6 +399,35 @@ export class ConsoleTransport implements LogTransport {
       entry.message = entry.message.replace('[SEARCH RESULT]', this.getSearchTypeTag());
     }
     
+    // Standardize [SRCH] tags
+    if (entry.message && entry.message.includes('[SRCH]')) {
+      entry.message = entry.message.replace('[SRCH]', this.getSearchTypeTag());
+    }
+    
+    // Standardize [BATCH SEARCH] tags
+    if (entry.message && entry.message.includes('[BATCH SEARCH]')) {
+      entry.message = entry.message.replace('[BATCH SEARCH]', `${this.getSearchTypeTag()} [BATCH]`);
+    }
+    
+    // Standardize [BATCH SEARCH RESULT] tags
+    if (entry.message && entry.message.includes('[BATCH SEARCH RESULT]')) {
+      entry.message = entry.message.replace('[BATCH SEARCH RESULT]', `${this.getSearchTypeTag()} [RESULT]`);
+    }
+    
+    // Skip redundant messages
+    if (entry.message && entry.message.includes('Searching tweets for')) {
+      return undefined;
+    }
+    
+    // Standardize "Found X tweets for batch" messages
+    if (entry.message && entry.message.match(/Found \d+ tweets for batch of \d+ accounts/)) {
+      const match = entry.message.match(/Found (\d+) tweets for batch of (\d+) accounts/);
+      if (match) {
+        const [_, tweetCount, accountCount] = match;
+        entry.message = `${this.getSearchTypeTag()} [BATCH] Found ${tweetCount} tweets from ${accountCount} accounts`;
+      }
+    }
+    
     // Special formatting for tweet search summary
     if (entry.data && entry.message.includes('Found') && entry.message.includes('tweets in search') && entry.data.status === 'TWEETS_FOUND_SUMMARY') {
       const searchId = entry.data?.searchId || '';
@@ -387,22 +482,35 @@ export class ConsoleTransport implements LogTransport {
       messageWithIndicators = `  ${messageWithIndicators}`;
     }
     
-    // Add colors to status indicators
+    // Add colors to status indicators with enhanced visual distinction
     messageWithIndicators = messageWithIndicators
-      .replace(/\[✓\]/g, this.formatter.green('[✓]'))
-      .replace(/\[✗\]/g, this.formatter.red('[✗]'))
-      .replace(/\[⏩\]/g, this.formatter.blue('[⏩]'))
-      .replace(/\[BATCH START\]/g, this.formatter.bold('[BATCH START]'))
-      .replace(/\[BATCH END\]/g, this.formatter.bold('[BATCH END]'))
-      .replace(/\[BATCH SUMMARY\]/g, this.formatter.bold('[BATCH SUMMARY]'))
-      .replace(/\[PIPELINE START\]/g, this.formatter.bold('[PIPELINE START]'))
-      .replace(/\[PIPELINE ✓\]/g, this.formatter.green('[PIPELINE ✓]'))
-      .replace(/\[PIPELINE ✗\]/g, this.formatter.red('[PIPELINE ✗]'))
-      .replace(/\[TWEET PROCESSING SUCCESS\]/g, this.formatter.green('[TWEET FOUND]'));
+      .replace(/\[✓\]/g, this.formatter.brightGreen('[✓]'))
+      .replace(/\[✗\]/g, this.formatter.brightRed('[✗]'))
+      .replace(/\[⏩\]/g, this.formatter.brightBlue('[⏩]'))
+      .replace(/\[BATCH START\]/g, this.formatter.bold(this.formatter.cyan('[BATCH START]')))
+      .replace(/\[BATCH END\]/g, this.formatter.bold(this.formatter.cyan('[BATCH END]')))
+      .replace(/\[BATCH SUMMARY\]/g, this.formatter.bold(this.formatter.yellow('[BATCH SUMMARY]')))
+      .replace(/\[BATCH SEARCH\]/g, this.formatter.brightBlue('[BATCH SEARCH]'))
+      .replace(/\[PIPELINE START\]/g, this.formatter.bold(this.formatter.cyan('[PIPELINE START]')))
+      .replace(/\[PIPELINE ✓\]/g, this.formatter.brightGreen('[PIPELINE ✓]'))
+      .replace(/\[PIPELINE ✗\]/g, this.formatter.brightRed('[PIPELINE ✗]'))
+      .replace(/\[TWEET PROCESSING SUCCESS\]/g, this.formatter.brightGreen('[TWEET FOUND]'))
+      .replace(/\[REJECTED\]/g, this.formatter.brightRed('[REJECTED]'))
+      // Standardize topic formatting - remove redundant "Topic" prefix and apply consistent coloring
+      .replace(/Topic COMPETITOR_TWEETS/g, this.formatter.blue('[TWEETS] COMPETITOR_TWEETS'))
+      .replace(/Topic COMPETITOR_MENTIONS/g, this.formatter.brightYellow('[MENTIONS] COMPETITOR_MENTIONS'))
+      .replace(/Topic TROJAN/g, this.formatter.magenta('[TROJAN] TROJAN'))
+      .replace(/Topic KOL_MONITORING/g, this.formatter.green('[KOL] KOL_MONITORING'))
+      // Standardize "processed" messages
+      .replace(/processed: (\d+) tweets found, (\d+) processed/g, (match, found, processed) =>
+        `[RESULT] ${found} tweets found, ${processed} processed`);
 
+    // Remove [Main] component as everything is from main process
+    const displayComponent = component !== 'TweetProcessor' && component !== 'Main' ? String(component) : '';
+    
     const baseMessage = this.formatter.formatLogComponents({
       timestamp: String(timestamp),
-      component: component !== 'TweetProcessor' ? String(component) : '',
+      component: displayComponent,
       message: messageWithIndicators,
       level: logLevel
     });
@@ -495,7 +603,7 @@ export class FileTransport implements LogTransport {
     const correlationId = entry.correlationId ? ` [${entry.correlationId}]` : '';
     
     // Format the log message
-    let message = `[${timestamp}] [${level}]${component !== 'TweetProcessor' ? ` [${component}]` : ''}${correlationId} ${entry.message}`;
+    let message = `[${timestamp}] [${level}]${component !== 'TweetProcessor' && component !== 'Main' ? ` [${component}]` : ''}${correlationId} ${entry.message}`;
     
     if (entry.data && Object.keys(entry.data).length > 0) {
       message += ` ${JSON.stringify(entry.data)}`;

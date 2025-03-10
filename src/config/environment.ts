@@ -209,7 +209,7 @@ export class Environment {
   validateEnvironment(): void {
     const requiredVars = [
       'TWITTER_API_KEY',
-      'TWITTER_BEARER_TOKEN',
+      // 'TWITTER_BEARER_TOKEN', // Removed as it's not actually used in the app
       'TELEGRAM_BOT_TOKEN',
       'TELEGRAM_CHAT_ID',
       'MONGO_DB_STRING'
@@ -250,7 +250,7 @@ export class Environment {
     // Load Twitter configuration
     const twitter = {
       api: {
-        bearerToken: getEnvVar('TWITTER_BEARER_TOKEN', true)!,
+        bearerToken: getEnvVar('TWITTER_BEARER_TOKEN', false) || 'dummy-token', // Made optional with a dummy default
         keys: {
           main: getEnvVar('TWITTER_API_KEY', true)!,
           additional: [
