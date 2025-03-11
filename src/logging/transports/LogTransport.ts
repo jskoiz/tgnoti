@@ -295,10 +295,6 @@ export class ConsoleTransport implements LogTransport {
       if (entry.message.includes('is a duplicate')) return undefined;
     }
     
-    // Filter out specific messages from TwitterNotifier
-    if (component === 'TwitterNotifier') {
-      if (entry.message.includes('Processing search window')) return undefined;
-    }
     
     // Filter out verbose tweet search logs from TweetMonitor
     if (component === 'TweetMonitor') {

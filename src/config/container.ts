@@ -39,7 +39,6 @@ import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManager.js';
 import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
 import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
-import { TwitterNotifier } from '../core/TwitterNotifier.js';
 import { MonitoringDashboard } from '../core/monitoring/MonitoringDashboard.js';
 import { DateValidator } from '../utils/dateValidation.js';
 import { TweetProcessor } from '../services/TweetProcessor.js';
@@ -157,7 +156,6 @@ export function createContainer(): Container {
   container.bind<SearchStrategy>(TYPES.SearchStrategy).to(SearchStrategy).inSingletonScope();
   container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
   container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
-  container.bind<TwitterNotifier>(TYPES.TwitterNotifier).to(TwitterNotifier).inSingletonScope();
   container.bind<TwitterService>(TYPES.TwitterService).to(TwitterService).inSingletonScope();
   container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
   container.bind<TelegramService>(TYPES.TelegramService).to(TelegramService).inSingletonScope();

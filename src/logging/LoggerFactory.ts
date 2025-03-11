@@ -58,7 +58,6 @@ export class LoggerFactory {
       'TweetProcessor': LogLevel.DEBUG,
       'SearchConfig': LogLevel.INFO,
       'SearchStrategy': LogLevel.INFO,
-      'TwitterNotifier': LogLevel.DEBUG,
       'RateLimitedQueue': LogLevel.DEBUG,
       'TwitterClient': LogLevel.DEBUG,
       'TelegramMessageSender': LogLevel.DEBUG,

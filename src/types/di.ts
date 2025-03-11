@@ -58,7 +58,6 @@ const TYPES = {
   TweetFormatter: Symbol.for('TweetFormatter'),
   MessageValidator: Symbol.for('MessageValidator'),
   MongoDataValidator: Symbol.for('MongoDataValidator'),
-  TwitterNotifier: Symbol.for('TwitterNotifier'),
 };
 
 export { TYPES };
