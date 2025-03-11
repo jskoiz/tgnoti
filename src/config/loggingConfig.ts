@@ -55,10 +55,6 @@ export class LoggingConfig {
     'SearchStrategy': {
       level: LogLevel.INFO
     },
-    'TwitterNotifier': {
-      level: LogLevel.DEBUG,
-      aggregationWindow: 60000  // 1 minute window for notifier aggregation
-    }
   };
 
   // File logging configuration
