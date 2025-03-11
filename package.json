@@ -1,5 +1,5 @@
 {
-  "name": "internoti",
+  "name": "tgnoti",
   "version": "1.0.0",
   "description": "A notification bridge between Twitter and Telegram",
   "main": "dist/index.js",

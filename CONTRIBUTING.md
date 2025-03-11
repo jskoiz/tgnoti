@@ -1,6 +1,6 @@
-# Contributing to Internoti
+# Contributing to tgnoti
 
-Thank you for your interest in contributing to Internoti. Before submitting any contributions, please be aware of the following guidelines:
+Thank you for your interest in contributing to tgnoti. Before submitting any contributions, please be aware of the following guidelines:
 
 ## Proprietary License
 
