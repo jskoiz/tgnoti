@@ -18,7 +18,7 @@ export class DefaultLogService implements Logger {
     skipOldTweets: true,
     // Skip detailed logs for duplicate tweets
     skipDuplicates: true,
-    // Skip detailed stage logs when summarized logging is enabled
+    // Skip detailed logs when summarized logging is enabled
     useSummarizedLogging: true
   };
   /**
@@ -230,12 +230,11 @@ export class DefaultLogService implements Logger {
    * @returns True if the message should be filtered out
    */
   private shouldFilterBasedOnContext(message: string, context?: LogContext): boolean {
-    // Skip detailed stage logs when summarized logging is enabled and we're in a large batch
-    if (DefaultLogService.filterRules.useSummarizedLogging && 
-        context?.status?.toString().includes('STAGE_') && 
-        !message.includes('SUMMARY') && 
+    // Skip detailed logs when summarized logging is enabled and we're in a large batch
+    if (DefaultLogService.filterRules.useSummarizedLogging &&
+        !message.includes('SUMMARY') &&
         !message.includes('BATCH') &&
-        context?.tweetCount && 
+        context?.tweetCount &&
         context.tweetCount > 5) {
       // Allow only the first and last few tweets to be logged in detail
       return true;
