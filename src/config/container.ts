@@ -8,6 +8,7 @@ import { MessageStorage } from '../telegram/types/messageStorage.js';
 import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 import { Logger } from '../types/logger.js';
 import { LogService } from '../logging/LogService.js';
+import { EnhancedCircuitBreaker } from '../utils/enhancedCircuitBreaker.js';
 import { ConsoleLogger } from '../utils/logger.js';
 import { Storage } from '../core/storage/storage.js';
 import { ConfigStorage } from '../core/storage/ConfigStorage.js';
@@ -26,6 +27,7 @@ import { MessageProcessor } from '../core/MessageProcessor.js';
 import { TelegramBot } from '../telegram/bot/telegramBot.js';
 import { TopicManager } from '../telegram/bot/TopicManager.js';
 import { TopicFilterManager } from '../telegram/bot/TopicFilterManager.js';
+import { FilterCommandHandler } from '../telegram/bot/FilterCommandHandler.js';
 import { RettiwtKeyManager } from '../core/twitter/rettiwtKeyManager.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
 import { RettiwtErrorHandler } from '../core/twitter/RettiwtErrorHandler.js';
@@ -132,6 +134,20 @@ export function createContainer(): Container {
     monitorInterval: 5000 // 5 seconds
   });
   
+  // Create and bind EnhancedCircuitBreaker instance
+  const circuitBreakerConfig = {
+    threshold: 5,
+    resetTimeout: 30000, // 30 seconds
+    testInterval: 5000,   // 5 seconds
+    monitorInterval: 5000 // 5 seconds
+  };
+  
+  // Create a factory for EnhancedCircuitBreaker
+  container.bind(TYPES.CircuitBreaker).toDynamicValue((context) => {
+    const logger = context.container.get<Logger>(TYPES.Logger);
+    return new EnhancedCircuitBreaker(logger, circuitBreakerConfig);
+  }).inSingletonScope();
+  
   container.bind<UsernameHandler>(TYPES.UsernameHandler).to(UsernameHandler).inSingletonScope();
   container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
 
@@ -180,6 +196,7 @@ export function createContainer(): Container {
   // Topic Management
   container.bind<TopicManager>(TYPES.TopicManager).to(TopicManager).inSingletonScope();
   container.bind<TopicFilterManager>(TYPES.TopicFilterManager).to(TopicFilterManager).inSingletonScope();
+  container.bind<FilterCommandHandler>(TYPES.FilterCommandHandler).to(FilterCommandHandler).inSingletonScope();
 
   // Validation
   container.bind<DateValidator>(TYPES.DateValidator).to(DateValidator).inSingletonScope();
@@ -213,6 +230,10 @@ export async function initializeContainer(): Promise<Container> {
   // Initialize services
   const telegramService = container.get<TelegramService>(TYPES.TelegramService);
   await telegramService.initialize();
+  
+  // Initialize TelegramBot
+  const telegramBot = container.get<TelegramBot>(TYPES.TelegramBot);
+  await telegramBot.initialize();
 
   // Start monitoring
   // Use enhanced monitor if available, otherwise fall back to regular monitor

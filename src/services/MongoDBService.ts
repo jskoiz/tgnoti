@@ -357,6 +357,8 @@ export class MongoDBService {
   
   async addTopicFilter(topicId: number, filter: TopicFilter, userId?: number): Promise<void> {
     try {
+      this.logger.info(`addTopicFilter called with: topicId=${topicId}, filter=${JSON.stringify(filter)}, userId=${userId}`);
+      
       // If MongoDB is not initialized, log a warning and return
       if (!this.client || !this.db) {
         this.logger.warn(`MongoDB not initialized. Cannot add filter to topic ${topicId}.`);
@@ -371,9 +373,13 @@ export class MongoDBService {
         createdAt: new Date(),
         createdBy: userId
       };
+      
+      this.logger.info(`Created filter document: ${JSON.stringify(filterDoc)}`);
 
       // Validate the filter document
       const validation = this.validator.validateTopicFilter(filterDoc);
+      this.logger.info(`Filter validation result: ${JSON.stringify(validation)}`);
+      
       if (!validation.isValid) {
         this.logger.warn(`Filter for topic ${topicId} failed validation: ${validation.errors.join(', ')}`);
         this.logger.debug('Invalid filter:', filterDoc);
@@ -384,33 +390,46 @@ export class MongoDBService {
       
       const collection = this.getTopicFiltersCollection();
       
-      await collection.updateOne(
-        {
+      const query = {
+        topicId,
+        filterType: filter.type,
+        value: filter.value
+      };
+      
+      const update = {
+        $set: {
           topicId,
           filterType: filter.type,
-          value: filter.value
-        },
-        {
-          $set: {
-            topicId,
-            filterType: filter.type,
-            value: filter.value,
-            createdAt: new Date(),
-            createdBy: userId
-          }
-        },
-        { upsert: true }
-      );
+          value: filter.value,
+          createdAt: new Date(),
+          createdBy: userId
+        }
+      };
+      
+      this.logger.info(`MongoDB query for filter addition: ${JSON.stringify(query)}`);
+      this.logger.info(`MongoDB update for filter addition: ${JSON.stringify(update)}`);
+      
+      const result = await collection.updateOne(query, update, { upsert: true });
+      
+      this.logger.info(`Filter addition result: ${JSON.stringify({
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        upsertedCount: result.upsertedCount,
+        upsertedId: result.upsertedId
+      })}`);
       
       this.logger.debug(`Filter added to topic ${topicId}: ${filter.type}:${filter.value}`);
     } catch (error) {
       this.logger.error(`Failed to add filter to topic ${topicId}:`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`Filter details: type=${filter.type}, value=${filter.value}`);
       throw error;
     }
   }
   
   async removeTopicFilter(topicId: number, filter: TopicFilter): Promise<void> {
     try {
+      this.logger.debug(`removeTopicFilter called with: topicId=${topicId}, filter=${JSON.stringify(filter)}`);
+      
       // If MongoDB is not initialized, log a warning and return
       if (!this.client || !this.db) {
         this.logger.warn(`MongoDB not initialized. Cannot remove filter from topic ${topicId}.`);
@@ -419,15 +438,24 @@ export class MongoDBService {
       
       const collection = this.getTopicFiltersCollection();
       
-      await collection.deleteOne({
+      const query = {
         topicId,
         filterType: filter.type,
         value: filter.value
-      });
+      };
       
-      this.logger.debug(`Filter removed from topic ${topicId}: ${filter.type}:${filter.value}`);
+      this.logger.debug(`MongoDB query for filter removal: ${JSON.stringify(query)}`);
+      
+      const result = await collection.deleteOne(query);
+      
+      if (result.deletedCount === 0) {
+        this.logger.warn(`No filter found to remove: topicId=${topicId}, type=${filter.type}, value=${filter.value}`);
+      } else {
+        this.logger.debug(`Filter removed from topic ${topicId}: ${filter.type}:${filter.value} (deletedCount: ${result.deletedCount})`);
+      }
     } catch (error) {
       this.logger.error(`Failed to remove filter from topic ${topicId}:`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`Filter details: type=${filter.type}, value=${filter.value}`);
       throw error;
     }
   }
