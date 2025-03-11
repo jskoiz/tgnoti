@@ -24,7 +24,7 @@
     "bot"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@types/node-telegram-bot-api": "^0.64.7",
     "axios": "^1.8.2",
