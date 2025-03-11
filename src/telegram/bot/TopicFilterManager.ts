@@ -87,8 +87,12 @@ export class TopicFilterManager {
     userId: number
   ): Promise<FilterOperationResult> {
     try {
+      this.logger.info(`addFilter called with: topicId=${topicId}, filter=${JSON.stringify(filter)}, userId=${userId}`);
+      
       // Validate input
       const validationResult = await this.validateFilter(topicId, filter);
+      this.logger.info(`Validation result: ${JSON.stringify(validationResult)}`);
+      
       if (!validationResult.success) {
         return validationResult;
       }
@@ -107,12 +111,16 @@ export class TopicFilterManager {
         filter.value = filter.value.replace(/^@/, '');
       }
 
+      this.logger.info(`Calling mongoDb.addTopicFilter with: topicId=${topicId}, filter=${JSON.stringify(filter)}`);
       await this.mongoDb.addTopicFilter(topicId, filter, userId);
 
-      return {
+      const result = {
         success: true,
         message: `Successfully added ${filter.type} filter: ${filter.value}`
       };
+      
+      this.logger.info(`addFilter success: ${JSON.stringify(result)}`);
+      return result;
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key error')) {
         this.logger.debug(`Filter already exists: ${filter.type}:${filter.value} for topic ${topicId}`);
@@ -136,7 +144,7 @@ export class TopicFilterManager {
       // First check if the filter already exists
       const existingFilters = await this.getFilters(topicId);
       const exists = existingFilters.some(
-        f => f.type === filter.type && 
+        f => f.type === filter.type &&
              f.value.toLowerCase() === filter.value.toLowerCase()
       );
       
@@ -165,6 +173,8 @@ export class TopicFilterManager {
     userId: number
   ): Promise<FilterOperationResult> {
     try {
+      this.logger.debug(`removeFilter called with: topicId=${topicId}, filter=${JSON.stringify(filter)}, userId=${userId}`);
+      
       // Check permissions
       const permissions = await this.checkFilterPermissions(userId, topicId);
       if (!permissions.canModify) {
@@ -173,25 +183,34 @@ export class TopicFilterManager {
           message: 'Permission denied: You cannot modify filters in this topic'
         };
       }
+// Normalize username for comparison
+let value = filter.value;
+if (filter.type === 'user' || filter.type === 'mention') {
+  value = value.replace(/^@/, '');
+}
 
-      // Normalize username for comparison
-      let value = filter.value;
-      if (filter.type === 'user' || filter.type === 'mention') {
-        value = value.replace(/^@/, '');
-      }
+this.logger.debug(`After normalization: value=${value}`);
 
-      await this.mongoDb.removeTopicFilter(topicId, {
-        type: filter.type,
-        value
-      });
+const normalizedFilter = {
+  type: filter.type,
+  value
+};
 
-      return {
+this.logger.debug(`Calling mongoDb.removeTopicFilter with: topicId=${topicId}, filter=${JSON.stringify(normalizedFilter)}`);
+
+await this.mongoDb.removeTopicFilter(topicId, normalizedFilter);
+
+      const result = {
         success: true,
         message: `Successfully removed ${filter.type} filter: ${filter.value}`
       };
+      
+      this.logger.debug(`removeFilter success: ${JSON.stringify(result)}`);
+      return result;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error('Failed to remove filter', err);
+      this.logger.error(`Failed to remove filter: ${err.message}`, err);
+      this.logger.error(`Filter details: topicId=${topicId}, type=${filter.type}, value=${filter.value}`);
       throw err;
     }
   }
@@ -214,13 +233,13 @@ export class TopicFilterManager {
       const sections = [];
       
       if (groupedFilters.user?.length) {
-        sections.push('Users:\n' + groupedFilters.user.map((u: string) => `@${u}`).join('\n'));
+        sections.push('<b>Users:</b>\n' + groupedFilters.user.map((u: string) => `@${u}`).join('\n'));
       }
       if (groupedFilters.mention?.length) {
-        sections.push('Mentions:\n' + groupedFilters.mention.map((m: string) => `@${m}`).join('\n'));
+        sections.push('<b>Mentions:</b>\n' + groupedFilters.mention.map((m: string) => `@${m}`).join('\n'));
       }
       if (groupedFilters.keyword?.length) {
-        sections.push('Keywords:\n' + groupedFilters.keyword.join('\n'));
+        sections.push('<b>Keywords:</b>\n' + groupedFilters.keyword.join('\n'));
       }
 
       return sections.join('\n\n');
@@ -229,6 +248,82 @@ export class TopicFilterManager {
       this.logger.error('Failed to list filters', err);
       throw err;
     }
+  }
+
+  async getTopicInfo(topicId: number): Promise<string> {
+    try {
+      const filters = await this.getFilters(topicId);
+      const groupedFilters = this.groupFiltersByType(filters);
+      
+      // Get topic name if available
+      const topicName = this.getTopicName(topicId) || `Topic #${topicId}`;
+      
+      // Build info sections
+      const sections = [
+        `<b>${topicName}</b>`,
+        '',
+        `<b>Filter Summary:</b>`,
+        `- Total Filters: ${filters.length}/${this.MAX_FILTERS_PER_TOPIC}`,
+        `- User Filters: ${groupedFilters.user?.length || 0}`,
+        `- Mention Filters: ${groupedFilters.mention?.length || 0}`,
+        `- Keyword Filters: ${groupedFilters.keyword?.length || 0}`,
+        ''
+      ];
+      
+      // Add filter details
+      if (filters.length > 0) {
+        sections.push('<b>Current Filters:</b>');
+        
+        if (groupedFilters.user?.length) {
+          sections.push('<b>Users:</b>');
+          sections.push(groupedFilters.user.map(u => `- @${u}`).join('\n'));
+          sections.push('');
+        }
+        
+        if (groupedFilters.mention?.length) {
+          sections.push('<b>Mentions:</b>');
+          sections.push(groupedFilters.mention.map(m => `- @${m}`).join('\n'));
+          sections.push('');
+        }
+        
+        if (groupedFilters.keyword?.length) {
+          sections.push('<b>Keywords:</b>');
+          sections.push(groupedFilters.keyword.map(k => `- ${k}`).join('\n'));
+        }
+      } else {
+        sections.push('<b>No filters configured for this topic.</b>');
+      }
+      
+      return sections.join('\n');
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Failed to get topic info', err);
+      throw err;
+    }
+  }
+
+  private groupFiltersByType(filters: TopicFilter[]): Record<FilterType, string[]> {
+    return filters.reduce((acc, filter) => {
+      if (!acc[filter.type]) {
+        acc[filter.type] = [];
+      }
+      acc[filter.type].push(filter.value);
+      return acc;
+    }, {} as Record<FilterType, string[]>);
+  }
+
+  private escapeMarkdown(text: string): string {
+    return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+  }
+
+  private getTopicName(topicId: number): string | undefined {
+    // Look up topic name from config if available
+    for (const [name, config] of Object.entries(TOPIC_CONFIG)) {
+      if (config.id === topicId) {
+        return name;
+      }
+    }
+    return undefined;
   }
 
   private async validateFilter(

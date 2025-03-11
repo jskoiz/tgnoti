@@ -38,6 +38,25 @@ export interface TweetFormatter {
   createMessageButtons(tweet: any, config: TweetMessageConfig): any[][];
 }
 
+// Interactive filter interface types
+export interface CallbackQueryData {
+  action: string;
+  topicId: number;
+  filterType?: string;
+  filterValue?: string;
+  page?: number;
+}
+
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+  url?: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 // New Queue-related types
 export interface QueuedMessage {
   chatId: number;

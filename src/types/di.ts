@@ -39,6 +39,7 @@ const TYPES = {
   TelegramMessageSender: Symbol.for('TelegramMessageSender'),
   TopicManager: Symbol.for('TopicManager'),
   TopicFilterManager: Symbol.for('TopicFilterManager'),
+  FilterCommandHandler: Symbol.for('FilterCommandHandler'),
   MessageFormatter: Symbol.for('MessageFormatter'),
   MessageStorage: Symbol.for('MessageStorage'),
 
