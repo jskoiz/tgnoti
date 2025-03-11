@@ -233,16 +233,10 @@ export async function initializeContainer(): Promise<Container> {
   const telegramBot = container.get<TelegramBot>(TYPES.TelegramBot);
   await telegramBot.initialize();
 
-  // Start monitoring
-  // Use enhanced monitor if available, otherwise fall back to regular monitor
-  try {
-    const enhancedMonitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);
-    await enhancedMonitor.initialize();
-    await enhancedMonitor.start();
-  } catch (error) {
-    console.warn('Enhanced monitor not available, using regular monitor');
-    await container.get<TweetMonitor>(TYPES.TweetMonitor).start();
-  }
+  // Start monitoring with EnhancedTweetMonitor
+  const enhancedMonitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);
+  await enhancedMonitor.initialize();
+  await enhancedMonitor.start();
   
   return container;
 }
