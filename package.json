@@ -27,7 +27,7 @@
   "license": "ISC",
   "dependencies": {
     "@types/node-telegram-bot-api": "^0.64.7",
-    "axios": "^1.6.3",
+    "axios": "^1.8.2",
     "chalk": "^5.4.1",
     "dotenv": "^16.4.7",
     "inversify": "^6.2.2",
