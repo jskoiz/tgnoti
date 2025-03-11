@@ -36,10 +36,6 @@ export class LoggingConfig {
     'TelegramMessageQueue': {
       level: LogLevel.DEBUG
     },
-    'ValidationStage': {
-      level: LogLevel.INFO,
-      aggregationWindow: 10000     // 10s window for validation aggregation
-    },
     'TweetProcessor': {
       level: LogLevel.INFO
     },
