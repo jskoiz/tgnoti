@@ -87,13 +87,30 @@ export class ConsoleTransport implements LogTransport {
         '\\[RESULT\\]'
       ];
       
+      // Patterns to explicitly block in quiet mode
+      const blockedPatterns = [
+        'Message queued for topic',
+        'Processing Telegram message queue',
+        'Sending message to Telegram topic',
+        'Telegram bot token',
+        'Message successfully sent to Telegram',
+        'Message sent to topic',
+        'Scheduling next message processing',
+        'remaining queue'
+      ];
+      
       // Check if the message matches any of the allowed patterns
       const isAllowed = allowedPatterns.some(pattern =>
         new RegExp(pattern).test(entry.message)
       );
       
-      // Skip messages that don't match any allowed pattern
-      if (!isAllowed && entry.level !== 0) { // Always show error messages
+      // Check if the message matches any of the blocked patterns
+      const isBlocked = blockedPatterns.some(pattern =>
+        entry.message.includes(pattern)
+      );
+      
+      // Skip messages that don't match any allowed pattern or match a blocked pattern
+      if ((!isAllowed || isBlocked) && entry.level !== 0) { // Always show error messages
         return; // Skip these messages entirely
       }
     }
