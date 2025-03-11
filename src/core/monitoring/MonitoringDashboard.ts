@@ -7,16 +7,7 @@ import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
 import { ColorFormatter } from '../../utils/colors.js';
 
-interface PipelineMetrics {
-  stageMetrics: {
-    [stageName: string]: {
-      successCount: number;
-      failureCount: number;
-      averageProcessingTime: number;
-      lastProcessingTime: number;
-      errorsByType: { [errorType: string]: number };
-    };
-  };
+interface EventMetrics {
   queueMetrics: TelegramQueueMetrics;
   overallMetrics: {
     totalProcessed: number;
@@ -61,8 +52,7 @@ interface SystemMetrics {
 
 @injectable()
 export class MonitoringDashboard {
-  private pipelineMetrics: PipelineMetrics = {
-    stageMetrics: {},
+  private eventMetrics: EventMetrics = {
     queueMetrics: {
       queueLength: 0,
       processingTime: 0,
@@ -115,8 +105,7 @@ export class MonitoringDashboard {
   }
 
   private initializeMetrics(): void {
-    this.pipelineMetrics = {
-      stageMetrics: {},
+    this.eventMetrics = {
       queueMetrics: {
         queueLength: 0,
         processingTime: 0,
@@ -191,23 +180,22 @@ export class MonitoringDashboard {
     
     // Overall metrics
     console.log(this.formatter.bold('📊 OVERALL METRICS'));
-    console.log(`Tweets Processed: ${this.formatter.cyan(String(this.pipelineMetrics.overallMetrics.totalProcessed))}`);
-    console.log(`Success Rate: ${this.formatter.green(this.pipelineMetrics.overallMetrics.successRate.toFixed(1) + '%')}`);
-    console.log(`Avg Processing Time: ${this.formatter.yellow(this.pipelineMetrics.overallMetrics.averageProcessingTime.toFixed(0) + 'ms')}`);
-    console.log(`Active Topics: ${this.formatter.cyan(String(this.pipelineMetrics.overallMetrics.activeTopics))}\n`);
+    console.log(`Tweets Processed: ${this.formatter.cyan(String(this.eventMetrics.overallMetrics.totalProcessed))}`);
+    console.log(`Success Rate: ${this.formatter.green(this.eventMetrics.overallMetrics.successRate.toFixed(1) + '%')}`);
+    console.log(`Avg Processing Time: ${this.formatter.yellow(this.eventMetrics.overallMetrics.averageProcessingTime.toFixed(0) + 'ms')}`);
+    console.log(`Active Topics: ${this.formatter.cyan(String(this.eventMetrics.overallMetrics.activeTopics))}\n`);
     
-    // Pipeline stage metrics
-    console.log(this.formatter.bold('🔄 PIPELINE STAGES'));
-    Object.entries(this.pipelineMetrics.stageMetrics).forEach(([stage, metrics]) => {
-      const total = metrics.successCount + metrics.failureCount;
-      const successRate = total > 0 ? (metrics.successCount / total) * 100 : 0;
-      const successRateFormatted = successRate >= 90 
-        ? this.formatter.green(`${successRate.toFixed(1)}%`) 
-        : successRate >= 50 
-          ? this.formatter.yellow(`${successRate.toFixed(1)}%`) 
+    // Topic metrics
+    console.log(this.formatter.bold('🔍 TOPIC METRICS'));
+    Object.entries(this.topicMetrics).forEach(([topicId, metrics]) => {
+      const successRate = metrics.processed > 0 ? (metrics.successful / metrics.processed) * 100 : 0;
+      const successRateFormatted = successRate >= 90
+        ? this.formatter.green(`${successRate.toFixed(1)}%`)
+        : successRate >= 50
+          ? this.formatter.yellow(`${successRate.toFixed(1)}%`)
           : this.formatter.red(`${successRate.toFixed(1)}%`);
       
-      console.log(`${this.formatter.cyan(stage.padEnd(15))}: ${metrics.successCount}/${total} (${successRateFormatted}) - ${metrics.averageProcessingTime.toFixed(0)}ms avg`);
+      console.log(`${this.formatter.cyan(metrics.name.padEnd(15))}: ${metrics.successful}/${metrics.processed} (${successRateFormatted}) - ${metrics.averageProcessingTime.toFixed(0)}ms avg`);
     });
     console.log();
     
@@ -241,51 +229,52 @@ export class MonitoringDashboard {
       // Get metrics from MetricsManager
       const currentMetrics = await this.metrics.getMetrics();
 
-      // Update pipeline metrics
-      Object.entries(currentMetrics).forEach(([key, value]) => {
-        if (key.startsWith('pipeline.')) {
-          const [_, stage, metric] = key.split('.');
-          if (!this.pipelineMetrics.stageMetrics[stage]) {
-            this.pipelineMetrics.stageMetrics[stage] = {
-              successCount: 0,
-              failureCount: 0,
-              averageProcessingTime: 0,
-              lastProcessingTime: 0,
-              errorsByType: {}
-            };
-          }
-
-          const stageMetrics = this.pipelineMetrics.stageMetrics[stage];
-          if (metric === 'success') {
-            stageMetrics.successCount = value as number;
-          } else if (metric === 'failure') {
-            stageMetrics.failureCount = value as number;
-          } else if (metric === 'duration') {
-            stageMetrics.lastProcessingTime = value as number;
-            stageMetrics.averageProcessingTime = 
-              (stageMetrics.averageProcessingTime + value as number) / 2;
-          }
+      // Check if we're using EnhancedMetricsManager
+      if (this.metrics instanceof MetricsManager) {
+        // Get topic metrics if available
+        if ('getAllTopicMetrics' in this.metrics) {
+          const enhancedMetrics = this.metrics as any; // Type cast to access enhanced methods
+          const topicMetricsMap = enhancedMetrics.getAllTopicMetrics();
+          
+          // Update topic metrics in our dashboard
+          topicMetricsMap.forEach((metrics: Map<string, number>, topicId: string) => {
+            const processed = metrics.get('processed') || 0;
+            const successful = metrics.get('successful') || 0;
+            const failed = metrics.get('failed') || 0;
+            const processingTime = metrics.get('processingTime') || 0;
+            
+            // Update or create topic metrics
+            if (this.topicMetrics[topicId]) {
+              this.topicMetrics[topicId].processed = processed;
+              this.topicMetrics[topicId].successful = successful;
+              this.topicMetrics[topicId].failed = failed;
+              this.topicMetrics[topicId].averageProcessingTime = processingTime;
+            }
+          });
         }
-      });
+      }
 
-      // Calculate overall metrics
-      const totalProcessed = Object.values(this.pipelineMetrics.stageMetrics)
-        .reduce((sum, metrics) => sum + metrics.successCount + metrics.failureCount, 0);
+      // Calculate overall metrics from topic metrics
+      const totalProcessed = Object.values(this.topicMetrics)
+        .reduce((sum, metrics) => sum + metrics.processed, 0);
       
-      const totalSuccess = Object.values(this.pipelineMetrics.stageMetrics)
-        .reduce((sum, metrics) => sum + metrics.successCount, 0);
+      const totalSuccess = Object.values(this.topicMetrics)
+        .reduce((sum, metrics) => sum + metrics.successful, 0);
 
-      this.pipelineMetrics.overallMetrics = {
+      const avgProcessingTime = Object.values(this.topicMetrics)
+        .reduce((sum, metrics) => sum + metrics.averageProcessingTime, 0) /
+        Math.max(1, Object.keys(this.topicMetrics).length);
+
+      this.eventMetrics.overallMetrics = {
         totalProcessed,
         successRate: totalProcessed > 0 ? (totalSuccess / totalProcessed) * 100 : 0,
-        averageProcessingTime: Object.values(this.pipelineMetrics.stageMetrics)
-          .reduce((sum, metrics) => sum + metrics.averageProcessingTime, 0),
+        averageProcessingTime: avgProcessingTime,
         activeTopics: Object.keys(this.topicMetrics).length
       };
 
       this.logger.debug('Metrics updated', {
         timestamp: new Date().toISOString(),
-        overallMetrics: this.pipelineMetrics.overallMetrics
+        overallMetrics: this.eventMetrics.overallMetrics
       });
 
     } catch (error) {
@@ -327,7 +316,7 @@ export class MonitoringDashboard {
   }
 
   public updateQueueMetrics(metrics: TelegramQueueMetrics): void {
-    this.pipelineMetrics.queueMetrics = metrics;
+    this.eventMetrics.queueMetrics = metrics;
   }
 
   public updateCircuitBreakerStatus(
@@ -356,12 +345,12 @@ export class MonitoringDashboard {
   }
 
   public getDashboardData(): {
-    pipeline: PipelineMetrics;
+    events: EventMetrics;
     topics: TopicMetrics;
     system: SystemMetrics;
   } {
     return {
-      pipeline: this.pipelineMetrics,
+      events: this.eventMetrics,
       topics: this.topicMetrics,
       system: this.systemMetrics
     };
