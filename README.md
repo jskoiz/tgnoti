@@ -1,4 +1,4 @@
-# Internoti
+# tgnoti
 
 A high-performance notification bridge between Twitter and Telegram. Monitors Twitter for specific accounts or mentions and forwards matching tweets to configured Telegram groups.
 
@@ -36,7 +36,7 @@ A high-performance notification bridge between Twitter and Telegram. Monitors Tw
    TELEGRAM_GROUP_ID=your_telegram_group_id
    
    # MongoDB
-   MONGODB_URI=mongodb://localhost:27017/internoti
+   MONGODB_URI=mongodb://localhost:27017/tgnoti
    
    # Optional
    LOG_LEVEL=info

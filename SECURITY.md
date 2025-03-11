@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-The security of Internoti is a top priority. If you believe you've found a security vulnerability in the project, please follow these steps:
+The security of tgnoti is a top priority. If you believe you've found a security vulnerability in the project, please follow these steps:
 
 1. **Do not disclose the vulnerability publicly**
 2. **Contact the project owner directly** with details of the vulnerability
@@ -24,6 +24,6 @@ When a security vulnerability is reported:
 
 ## Supported Versions
 
-Only the latest version of Internoti receives security updates. Users are encouraged to keep their installations up to date.
+Only the latest version of tgnoti receives security updates. Users are encouraged to keep their installations up to date.
 
-Thank you for helping to keep Internoti secure.
+Thank you for helping to keep tgnoti secure.
