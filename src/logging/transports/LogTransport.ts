@@ -101,8 +101,6 @@ export class ConsoleTransport implements LogTransport {
     // Add log category prefix based on component and message
     if (this.format === 'text' && !entry.message.startsWith('[')) {
       if (entry.component === 'TweetProcessor') entry.message = `[PROC] ${entry.message}`;
-      else if (entry.message.includes('pipeline') || entry.message.includes('Pipeline')) entry.message = `[PIPE] ${entry.message}`;
-      else if (entry.message.includes('stage') || entry.message.includes('Stage')) entry.message = `[STAGE] ${entry.message}`;
       else if (entry.message.includes('search') || entry.message.includes('Search')) entry.message = `[SRCH] ${entry.message}`;
       else if (entry.message.includes('kol_monitoring')) {
         this.currentSearchType = 'kol';
@@ -473,10 +471,6 @@ export class ConsoleTransport implements LogTransport {
     // Add visual indicators based on message content
     let messageWithIndicators = entry.message;
     
-    // Add indentation for stage logs if they're part of a pipeline
-    if (entry.message.includes('[STAGE') && !entry.message.includes('[BATCH')) {
-      messageWithIndicators = `  ${messageWithIndicators}`;
-    }
     
     // Add colors to status indicators with enhanced visual distinction
     messageWithIndicators = messageWithIndicators
@@ -487,9 +481,6 @@ export class ConsoleTransport implements LogTransport {
       .replace(/\[BATCH END\]/g, this.formatter.bold(this.formatter.cyan('[BATCH END]')))
       .replace(/\[BATCH SUMMARY\]/g, this.formatter.bold(this.formatter.yellow('[BATCH SUMMARY]')))
       .replace(/\[BATCH SEARCH\]/g, this.formatter.brightBlue('[BATCH SEARCH]'))
-      .replace(/\[PIPELINE START\]/g, this.formatter.bold(this.formatter.cyan('[PIPELINE START]')))
-      .replace(/\[PIPELINE ✓\]/g, this.formatter.brightGreen('[PIPELINE ✓]'))
-      .replace(/\[PIPELINE ✗\]/g, this.formatter.brightRed('[PIPELINE ✗]'))
       .replace(/\[TWEET PROCESSING SUCCESS\]/g, this.formatter.brightGreen('[TWEET FOUND]'))
       .replace(/\[REJECTED\]/g, this.formatter.brightRed('[REJECTED]'))
       // Standardize topic formatting - remove redundant "Topic" prefix and apply consistent coloring

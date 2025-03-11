@@ -52,9 +52,6 @@ export class LoggerFactory {
     defaultLevel: LogLevel.INFO,
     format: 'text',
     componentLevels: {
-      'DuplicateCheckStage': LogLevel.INFO,
-      'FilterStage': LogLevel.INFO,
-      'ValidationStage': LogLevel.INFO,
       'TweetProcessor': LogLevel.DEBUG,
       'SearchConfig': LogLevel.INFO,
       'SearchStrategy': LogLevel.INFO,
