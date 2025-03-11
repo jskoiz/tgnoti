@@ -41,3 +41,4 @@ memory-bank
 examples/
 test-logging.js
 telegram-bot.lock
+LOGGING.md
