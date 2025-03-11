@@ -38,3 +38,6 @@ memory-bank/
 memory-bank
 .clinerules*
 *.db
+examples/
+test-logging.js
+telegram-bot.lock
