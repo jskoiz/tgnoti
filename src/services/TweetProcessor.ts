@@ -9,6 +9,9 @@ import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { TelegramService } from '../services/TelegramService.js';
 import { TweetFormatter, TweetMessageConfig, FormattedMessage } from '../types/telegram.js';
 
+// Default minimum number of substantive words required for a tweet to be considered substantive
+const DEFAULT_MIN_SUBSTANTIVE_WORDS = 4;
+
 @injectable()
 export class TweetProcessor {
   constructor(
@@ -167,6 +170,41 @@ export class TweetProcessor {
     return true;
   }
   
+  /**
+   * Determines if a tweet has enough substantive content to be worth forwarding
+   * Filters out short replies with minimal content
+   * @param tweet The tweet to analyze
+   * @param minWords Optional minimum word count, defaults to environment variable or constant
+   * @returns true if the tweet has substantive content, false otherwise
+   */
+  private isSubstantiveTweet(tweet: Tweet, minWords?: number): boolean {
+    // Get the minimum word count from parameter, environment, or use default
+    const minSubstantiveWords = minWords || (process.env.MIN_SUBSTANTIVE_WORDS 
+      ? parseInt(process.env.MIN_SUBSTANTIVE_WORDS, 10) 
+      : DEFAULT_MIN_SUBSTANTIVE_WORDS);
+    
+    // Get the tweet text
+    let text = tweet.text || '';
+    
+    // Remove all @mentions
+    text = text.replace(/@\w+/g, '');
+    
+    // Remove URLs
+    text = text.replace(/https?:\/\/\S+/g, '');
+    
+    // Split into words and filter out empty strings
+    const words = text.split(/\s+/).filter(word => word.length > 0);
+    
+    // Count substantive words
+    const wordCount = words.length;
+    
+    // Log for debugging
+    this.logger.debug(`Tweet ${tweet.id} has ${wordCount} substantive words: "${words.join(' ')}"`);
+    
+    // Return true if the tweet has more than the minimum number of substantive words
+    return wordCount >= minSubstantiveWords;
+  }
+
   private matchesTopicFilters(tweet: Tweet, topic: TopicConfig): boolean {
     const username = tweet.tweetBy?.userName?.toLowerCase();
     if (!username) return false;
@@ -179,6 +217,27 @@ export class TweetProcessor {
     // Check if tweet is from one of the monitored accounts
     if (topic.accounts && topic.accounts.some(account => 
       account.toLowerCase() === username)) {
+      
+      // For KOL monitoring topic (ID: 6531), apply special filtering
+      if (topic.id === 6531) {
+        // Check if this is a reply - either by replyToTweet property or by starting with @mention
+        const hasReplyProperty = !!tweet.replyToTweet;
+        const startsWithMention = tweet.text.trim().match(/^@\w+/);
+        const isReply = hasReplyProperty || startsWithMention;
+        
+        if (isReply) {
+          // For replies, require at least 6 substantive words
+          if (!this.isSubstantiveTweet(tweet, 6)) {
+            this.logger.debug(`KOL tweet from @${username} filtered out: reply with insufficient content`);
+            this.metrics.increment('tweets.filter.kol_reply_insufficient');
+            return false;
+          }
+          this.logger.debug(`KOL reply from @${username} has sufficient content (>6 words)`);
+        } else {
+          this.logger.debug(`KOL tweet from @${username} is not a reply, including`);
+        }
+      }
+      
       this.logger.debug(`Tweet from @${username} matches account filter for topic ${topic.name}`);
       this.metrics.increment('tweets.filter.match.user');
       this.logger.debug(`Tweet from @${username} MATCHES account filter for topic ${topic.name}`);
@@ -194,6 +253,16 @@ export class TweetProcessor {
           account.toLowerCase() === mention.toLowerCase()));
       
       if (hasMention) {
+        // For COMPETITOR_MENTIONS topic (ID: 12110), check if the tweet has substantive content
+        if (topic.id === 12110) {
+          if (!this.isSubstantiveTweet(tweet)) {
+            this.logger.debug(`Tweet from @${username} filtered out due to insufficient content`);
+            this.metrics.increment('tweets.filter.insufficient_content');
+            return false;
+          }
+          this.logger.debug(`Tweet from @${username} has sufficient content for COMPETITOR_MENTIONS topic`);
+        }
+        
         this.logger.debug(`Tweet from @${username} matches mention filter for topic ${topic.name}`);
         this.logger.debug(`Tweet from @${username} MATCHES mention filter for topic ${topic.name}`);
         this.metrics.increment('tweets.filter.match.mention');

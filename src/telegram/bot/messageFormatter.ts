@@ -162,12 +162,8 @@ ${this.formatMediaIndicator(tweet.media)}
       // Timestamp
       this.formatTimestamp(tweet.createdAt),
       
-      // Engagement metrics
-      this.formatEngagementMetrics(tweet),
-      
-      // Add double spacing before tweet content for better readability
-      '',
-      '',
+      // Add blank line between header/timestamp and tweet content
+      '\n',
       
       // Tweet content (with t.co URLs removed)
       tweetText,
@@ -183,7 +179,16 @@ ${this.formatMediaIndicator(tweet.media)}
       quotedTweet ? this.formatQuotedTweet(quotedTweet) : '',
       
       // Translation if applicable
-      translationMessage || ''
+      translationMessage || '',
+      
+      // Empty line break before engagement metrics
+      '\n',
+      
+      // Line of underscores
+      '________________',
+      
+      // Engagement metrics at the bottom
+      this.formatEngagementMetrics(tweet)
       
       // Tweet link removed as per requirements
     ];

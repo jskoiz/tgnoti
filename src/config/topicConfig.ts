@@ -117,6 +117,254 @@ export const TOPIC_CONFIG: Record<string, TopicDetails> = {
       {
         type: 'user',
         value: 'artsch00lreject'
+      },
+      {
+        type: 'user',
+        value: 'yogurt_eth'
+      },
+      {
+        type: 'user',
+        value: 'traderpow'
+      },
+      {
+        type: 'user',
+        value: '404flipped'
+      },
+      {
+        type: 'user',
+        value: 'shockedjs'
+      },
+      {
+        type: 'user',
+        value: 'EasyEatsBodega'
+      },
+      {
+        type: 'user',
+        value: 'IcedKnife'
+      },
+      {
+        type: 'user',
+        value: 'CoolerFlips'
+      },
+      {
+        type: 'user',
+        value: 'SolanaLegend'
+      },
+      {
+        type: 'user',
+        value: 'dingalingts'
+      },
+      {
+        type: 'user',
+        value: 'knction'
+      },
+      {
+        type: 'user',
+        value: '0xKoyo'
+      },
+      {
+        type: 'user',
+        value: 'The__Statice'
+      },
+      {
+        type: 'user',
+        value: 'cozypront'
+      },
+      {
+        type: 'user',
+        value: '0xInvestree'
+      },
+      {
+        type: 'user',
+        value: '0xsunmft'
+      },
+      {
+        type: 'user',
+        value: 'frankdegods'
+      },
+      {
+        type: 'user',
+        value: 'NFTDoctor33'
+      },
+      {
+        type: 'user',
+        value: 'JerzyNFT'
+      },
+      {
+        type: 'user',
+        value: 'cryptolyxe'
+      },
+      {
+        type: 'user',
+        value: 'solashenone'
+      },
+      {
+        type: 'user',
+        value: 'TheRealZrool'
+      },
+      {
+        type: 'user',
+        value: 'rajj_s23'
+      },
+      {
+        type: 'user',
+        value: 'deanbulla'
+      },
+      {
+        type: 'user',
+        value: 'mikadontlouz'
+      },
+      {
+        type: 'user',
+        value: 'jussy_world'
+      },
+      {
+        type: 'user',
+        value: 'dukezfn'
+      },
+      {
+        type: 'user',
+        value: 'igndex'
+      },
+      {
+        type: 'user',
+        value: 'nyhrox'
+      },
+      {
+        type: 'user',
+        value: '973Meech'
+      },
+      {
+        type: 'user',
+        value: 'redwithbag'
+      },
+      {
+        type: 'user',
+        value: 'assasin_eth'
+      },
+      {
+        type: 'user',
+        value: 'kreo444'
+      },
+      {
+        type: 'user',
+        value: 'br4ted'
+      },
+      {
+        type: 'user',
+        value: 'j777crypto'
+      },
+      {
+        type: 'user',
+        value: 'incomesharks'
+      },
+      {
+        type: 'user',
+        value: 'nftboi_'
+      },
+      {
+        type: 'user',
+        value: 'quanterty'
+      },
+      {
+        type: 'user',
+        value: 'spunosounds'
+      },
+      {
+        type: 'user',
+        value: '0xramonos'
+      },
+      {
+        type: 'user',
+        value: 'mrpunkdoteth'
+      },
+      {
+        type: 'user',
+        value: 'OrangeSBS'
+      },
+      {
+        type: 'user',
+        value: 'FlippingProfits'
+      },
+      {
+        type: 'user',
+        value: 'Yennii56'
+      },
+      {
+        type: 'user',
+        value: 'degnsol'
+      },
+      {
+        type: 'user',
+        value: 'muzzyvermillion'
+      },
+      {
+        type: 'user',
+        value: 'trading_axe'
+      },
+      {
+        type: 'user',
+        value: 'Ga__ke'
+      },
+      {
+        type: 'user',
+        value: 'RowdyCrypto'
+      },
+      {
+        type: 'user',
+        value: 'Atitty_'
+      },
+      {
+        type: 'user',
+        value: 'daumeneth'
+      },
+      {
+        type: 'user',
+        value: 'Sartoshi0x'
+      },
+      {
+        type: 'user',
+        value: 'smileycapital'
+      },
+      {
+        type: 'user',
+        value: 'tethegamer'
+      },
+      {
+        type: 'user',
+        value: 'kookcapitalllc'
+      },
+      {
+        type: 'user',
+        value: 'metaversejoji'
+      },
+      {
+        type: 'user',
+        value: 'kropts'
+      },
+      {
+        type: 'user',
+        value: 'Mamba248x'
+      },
+      {
+        type: 'user',
+        value: 'eth_exy'
+      },
+      {
+        type: 'user',
+        value: 'wirelyss'
+      },
+      {
+        type: 'user',
+        value: 'Chilearmy123'
+      },
+      {
+        type: 'user',
+        value: 'izebel_eth'
+      },
+      {
+        type: 'user',
+        value: 'Lewsiphur'
       }
     ]
   },
