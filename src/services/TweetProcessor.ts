@@ -7,6 +7,7 @@ import { ConfigService } from './ConfigService.js';
 import { TopicConfig } from '../config/unified.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { TelegramService } from '../services/TelegramService.js';
+import { TweetFormatter, TweetMessageConfig, FormattedMessage } from '../types/telegram.js';
 
 @injectable()
 export class TweetProcessor {
@@ -15,7 +16,8 @@ export class TweetProcessor {
     @inject(TYPES.StorageService) private storage: StorageService,
     @inject(TYPES.ConfigService) private config: ConfigService,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.TelegramService) private telegram: TelegramService
+    @inject(TYPES.TelegramService) private telegram: TelegramService,
+    @inject(TYPES.TweetFormatter) private tweetFormatter: TweetFormatter
   ) {
     this.logger.setComponent('TweetProcessor');
   }
@@ -219,25 +221,61 @@ export class TweetProcessor {
     return false;
   }
   
-  private formatTweet(tweet: Tweet): string {
-    // Basic formatting
-    const username = tweet.tweetBy?.userName || 'unknown';
-    const displayName = tweet.tweetBy?.displayName || 'Unknown User';
-    const text = tweet.text || '';
-    const date = new Date(tweet.createdAt).toLocaleString();
-    const url = `https://twitter.com/${username}/status/${tweet.id}`;
+  private formatTweet(tweet: Tweet): string | FormattedMessage {
+    // Check if the tweet has photo media
+    const hasPhoto = tweet.media?.some(m => m.type === 'photo');
     
-    let formattedTweet = `<b>${displayName}</b> (@${username}) - ${date}\n\n${text}\n\n<a href="${url}">View Tweet</a>`;
-    
-    // Add media links if present
-    if (tweet.media && tweet.media.length > 0) {
-      formattedTweet += '\n\nMedia:';
-      tweet.media.forEach((media, index) => {
-        const icon = media.type === 'photo' ? '📸' : media.type === 'video' ? '🎥' : '🎞️';
-        formattedTweet += `\n${icon} <a href="${media.url}">Media ${index + 1}</a>`;
-      });
+    if (hasPhoto && tweet.media && tweet.media.length > 0) {
+      // Find the first photo
+      const photoUrl = tweet.media.find(m => m.type === 'photo')?.url;
+      
+      if (photoUrl) {
+        // Use the EnhancedMessageFormatter to format the tweet as a caption
+        const config: TweetMessageConfig = {
+          tweet,
+          quotedTweet: tweet.quotedTweet,
+          replyToTweet: tweet.replyToTweet,
+          mediaHandling: 'attachment' // Don't include media links in the caption
+        };
+        
+        const caption = this.tweetFormatter.formatMessage(config);
+        
+        // Create buttons for the message
+        const buttons = this.tweetFormatter.createMessageButtons(tweet, config);
+        
+        // Return a FormattedMessage object with photo, caption, and buttons
+        return {
+          photo: photoUrl,
+          caption: caption,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: buttons
+          }
+        };
+      }
     }
     
-    return formattedTweet;
+    // If no photo or couldn't find photo URL, format as regular text message
+    const config: TweetMessageConfig = {
+      tweet,
+      quotedTweet: tweet.quotedTweet,
+      replyToTweet: tweet.replyToTweet,
+      mediaHandling: 'inline'
+    };
+    
+    // Create buttons for the message
+    const buttons = this.tweetFormatter.createMessageButtons(tweet, config);
+    
+    // Format the message text
+    const messageText = this.tweetFormatter.formatMessage(config);
+    
+    // Return a FormattedMessage object with text and buttons
+    return {
+      text: messageText,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: buttons
+      }
+    };
   }
 }

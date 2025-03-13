@@ -34,7 +34,7 @@ import { TelegramMessageSender } from '../telegram/queue/TelegramMessageSender.j
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManager.js';
 import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
-import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
+// RateLimitedQueue has been replaced by EnhancedRateLimiter
 import { DateValidator } from '../utils/dateValidation.js';
 import { TweetProcessor } from '../services/TweetProcessor.js';
 import { TelegramService } from '../services/TelegramService.js';
@@ -140,7 +140,7 @@ export function createContainer(): Container {
   }).inSingletonScope();
   
   container.bind<UsernameHandler>(TYPES.UsernameHandler).to(UsernameHandler).inSingletonScope();
-  container.bind<RateLimitedQueue>(TYPES.RateLimitedQueue).to(RateLimitedQueue).inSingletonScope();
+  // RateLimitedQueue binding removed as it's been replaced by EnhancedRateLimiter
 
   // Twitter Related
   container.bind<TwitterClient>(TYPES.TwitterClient).to(TwitterClient).inSingletonScope();

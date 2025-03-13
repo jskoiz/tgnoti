@@ -29,6 +29,7 @@ export interface TweetMessageConfig {
   quotedTweet?: any;
   replyToTweet?: any;
   showSummarizeButton?: boolean;
+  showSignature?: boolean;
   mediaHandling?: 'inline' | 'attachment';
   translationMessage?: string;
 }

@@ -11,11 +11,15 @@ export class EnhancedMessageFormatter implements TweetFormatter {
   }
 
   private formatUserLink(user: Tweet['tweetBy']): string {
-    return `<b><a href="https://x.com/${user?.userName || ''}">${user?.displayName || 'Unknown User'}</a></b>`;
+    const displayName = user?.displayName || 'Unknown User';
+    const userName = user?.userName || '';
+    // Format: "Klaus" with link to profile
+    return `<a href="https://x.com/${userName}"><b>${displayName}</b></a>`;
   }
 
   private formatStats(user: Tweet['tweetBy']): string {
-    return `(${(user?.followersCount || 0).toLocaleString()} followers)`;
+    // Format: "79 followers"
+    return `<i>${(user?.followersCount || 0).toLocaleString()} followers</i>`;
   }
 
   private formatMetric(value: number): string {
@@ -23,7 +27,8 @@ export class EnhancedMessageFormatter implements TweetFormatter {
   }
 
   private getRefreshLink(username: string): string {
-    return `<a href="refresh:${username}">♽</a>`;
+    // Returning empty string as per requirements to remove the refresh link
+    return '';
   }
 
   private formatTimestamp(dateStr: string): string {
@@ -36,69 +41,86 @@ export class EnhancedMessageFormatter implements TweetFormatter {
       ? `${minutes}m ago`
       : `${Math.floor(minutes / 60)}h ago`;
 
-    return `🗓️ ${date.toLocaleDateString('en-US', {
+    // Format: "🗓️ Mar 13, 25 @ 04:42 AM (4h ago)"
+    return `🗓️ <i>${date.toLocaleDateString('en-US', {
       month: 'short',
-      day: '2-digit',
+      day: 'numeric',
       year: '2-digit'
     })} @ ${date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true
-    })} (${timeAgo})`;
+    })} (${timeAgo})</i>`;
   }
 
   private formatMediaUrls(media?: Tweet['media']): string {
     if (!media?.length) return '';
     
-    const mediaLinks = media.map((m, i) => {
-      const typeEmoji = m.type === 'video' ? '🎥' : m.type === 'gif' ? '🎞️' : '📸';
-      return `${typeEmoji} <a href="${m.url}">Media ${i + 1}</a>`;
-    });
+    // Only include video and gif indicators, not photos (as per requirements)
+    const videoCount = media.filter(m => m.type === 'video').length;
+    const gifCount = media.filter(m => m.type === 'gif').length;
     
-    return mediaLinks.join('\n');
+    const summaryLines = [];
+    
+    if (videoCount > 0) {
+      summaryLines.push(`🎥 <i>${videoCount}</i>`);
+    }
+    
+    if (gifCount > 0) {
+      summaryLines.push(`🎞️ <i>${gifCount}</i>`);
+    }
+    
+    // No photo indicators as per requirements
+    
+    return summaryLines.join('\n');
   }
 
   private formatMediaIndicator(media?: Tweet['media']): string {
     if (!media?.length) return '';
-    const types = media.map(m => m.type);
-    const indicators = {
-      photo: '📸',
-      video: '🎥',
-      gif: '🎞️'
-    };
     
-    const counts = types.reduce((acc, type) => {
-      acc[type] = (acc[type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    // Only include video and gif indicators, not photos (as per requirements)
+    const videoCount = media.filter(m => m.type === 'video').length;
+    const gifCount = media.filter(m => m.type === 'gif').length;
     
-    return Object.entries(counts)
-      .map(([type, count]) => `${indicators[type as keyof typeof indicators]} ${count}`)
-      .join(' ');
+    const summaryLines = [];
+    
+    if (videoCount > 0) {
+      summaryLines.push(`🎥 <i>${videoCount}</i>`);
+    }
+    
+    if (gifCount > 0) {
+      summaryLines.push(`🎞️ <i>${gifCount}</i>`);
+    }
+    
+    // No photo indicators as per requirements
+    
+    return summaryLines.join('\n');
   }
 
   private formatReplyContext(tweet: Tweet, mediaHandling: 'inline' | 'attachment' = 'inline'): string {
     if (!tweet) return '';
     
     return `<blockquote>
-${this.formatHeader(tweet)} 
-${this.formatTimestamp(tweet.createdAt)} 
+${this.formatHeader(tweet)}
+${this.formatTimestamp(tweet.createdAt)}
 ${this.formatEngagementMetrics(tweet)}
 
 ${tweet?.text || ''}
 ${mediaHandling === 'inline' ? this.formatMediaUrls(tweet.media) : this.formatMediaIndicator(tweet.media)}
-
 </blockquote>`;
   }
 
   private formatHeader(tweet: Tweet): string {
     const emoji = this.getUserEmoji(tweet.tweetBy);
+    const userLink = this.formatUserLink(tweet.tweetBy);
     const stats = this.formatStats(tweet.tweetBy);
     
-    return `${emoji} ${this.formatUserLink(tweet.tweetBy)} ${stats}`;
+    // Format: "🥷 Klaus 79 followers"
+    return `${emoji} ${userLink} ${stats}`;
   }
 
   private formatEngagementMetrics(tweet: Tweet): string {
+    // Format: "💬 0 🔁 0 ❤️ 0 👁️ 14"
     return [
       `💬 ${this.formatMetric(tweet?.replyCount || 0)}`,
       `🔁 ${this.formatMetric(tweet?.retweetCount || 0)}`,
@@ -121,24 +143,49 @@ ${this.formatMediaIndicator(tweet.media)}
   }
 
   private formatTweetLink(tweet: Tweet): string {
-    return `_______________\nhttps://x.com/${tweet.tweetBy?.userName || ''}/status/${tweet?.id || ''}`;
+    // Format: "— https://x.com/username/status/id"
+    return `—\nhttps://x.com/${tweet.tweetBy?.userName || ''}/status/${tweet?.id || ''}`;
   }
 
   public formatMessage(config: TweetMessageConfig): string {
     const { tweet, quotedTweet, replyToTweet, translationMessage, mediaHandling = 'inline' } = config;
     
+    // Clean up tweet text by removing t.co URLs
+    let tweetText = tweet?.text || '';
+    // Remove t.co URLs (they typically start with https://t.co/)
+    tweetText = tweetText.replace(/https:\/\/t\.co\/\w+/g, '').trim();
+    
     const parts = [
+      // Header with username, stats, and refresh link
       this.formatHeader(tweet),
+      
+      // Timestamp
       this.formatTimestamp(tweet.createdAt),
-      // Add two line breaks after the engagement metrics
-      `${this.formatEngagementMetrics(tweet)}\n\n`,
-      tweet?.text || '',
+      
+      // Engagement metrics
+      this.formatEngagementMetrics(tweet),
+      
+      // Add double spacing before tweet content for better readability
+      '',
+      '',
+      
+      // Tweet content (with t.co URLs removed)
+      tweetText,
+      
+      // Media - only include for videos and GIFs, not photos
       mediaHandling === 'inline' ? this.formatMediaUrls(tweet.media) : this.formatMediaIndicator(tweet.media),
-      replyToTweet ? '\n\nReplying to:\n' : '',
+      
+      // Reply context if applicable
+      replyToTweet ? '\nReplying to:' : '',
       replyToTweet ? this.formatReplyContext(replyToTweet, mediaHandling) : '',
+      
+      // Quoted tweet if applicable
       quotedTweet ? this.formatQuotedTweet(quotedTweet) : '',
-      translationMessage || '',
-      this.formatTweetLink(tweet)
+      
+      // Translation if applicable
+      translationMessage || ''
+      
+      // Tweet link removed as per requirements
     ];
 
     return parts.filter(Boolean).join('\n');
@@ -147,14 +194,17 @@ ${this.formatMediaIndicator(tweet.media)}
   public createMessageButtons(tweet: Tweet, config: TweetMessageConfig): InlineKeyboardButton[][] {
     const buttons: InlineKeyboardButton[][] = [];
 
+    // Put both buttons in a single row
     buttons.push([
+      // View Tweet button with chain link emoji
       {
-        text: 'Delete',
-        callback_data: `delete:${tweet.id}`
-      },
-      {
-        text: 'View Tweet',
+        text: '🔗 View Tweet',
         url: `https://x.com/${tweet.tweetBy?.userName || ''}/status/${tweet?.id || ''}`
+      },
+      // Refresh Stats button with recycle emoji
+      {
+        text: '♻️ Refresh Stats',
+        callback_data: `refresh:${tweet.id}`
       }
     ]);
 
