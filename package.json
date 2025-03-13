@@ -15,7 +15,8 @@
     "prebuild": "npm run clean",
     "test": "jest",
     "dashboard": "NODE_NO_WARNINGS=1 ts-node tools/show-dashboard.ts",
-    "log-viewer": "NODE_NO_WARNINGS=1 SHOW_DASHBOARD=true nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts"
+    "log-viewer": "NODE_NO_WARNINGS=1 SHOW_DASHBOARD=true nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
+    "tweet-analysis": "NODE_NO_WARNINGS=1 tsx tools/run-tweet-analysis.ts"
   },
   "keywords": [
     "twitter",
