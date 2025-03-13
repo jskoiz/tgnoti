@@ -5,16 +5,14 @@ import { SearchConfig } from './searchConfig.js';
 import { Environment } from './environment.js';
 import { FileMessageStorage } from '../telegram/storage/messageStorage.js';
 import { MessageStorage } from '../telegram/types/messageStorage.js';
-import { CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
+import { EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 import { Logger } from '../types/logger.js';
 import { LogService } from '../logging/LogService.js';
 import { EnhancedCircuitBreaker } from '../utils/enhancedCircuitBreaker.js';
-import { ConsoleLogger } from '../utils/logger.js';
 import { Storage } from '../core/storage/storage.js';
 import { ConfigStorage } from '../core/storage/ConfigStorage.js';
 import { ConfigManager } from './ConfigManager.js';
 import { ConfigService } from '../services/ConfigService.js';
-import { MongoDBManager } from '../core/storage/MongoDBManager.js';
 import { TwitterService } from '../services/TwitterService.js';
 import { MongoDBService } from '../services/MongoDBService.js';
 import { StorageService } from '../services/StorageService.js';
@@ -22,8 +20,6 @@ import { TwitterClient } from '../core/twitter/twitterClient.js';
 import { RettiwtSearchBuilder } from '../core/twitter/rettiwtSearchBuilder.js';
 import { SearchStrategy } from '../core/twitter/searchStrategy.js';
 import { SearchCacheManager } from '../core/twitter/SearchCacheManager.js';
-import { TweetMonitor } from '../services/TweetMonitor.js';
-import { MessageProcessor } from '../core/MessageProcessor.js';
 import { TelegramBot } from '../telegram/bot/telegramBot.js';
 import { TopicManager } from '../telegram/bot/TopicManager.js';
 import { TopicFilterManager } from '../telegram/bot/TopicFilterManager.js';
@@ -39,7 +35,6 @@ import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManager.js';
 import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
 import { RateLimitedQueue } from '../core/RateLimitedQueue.js';
-import { MonitoringDashboard } from '../core/monitoring/MonitoringDashboard.js';
 import { DateValidator } from '../utils/dateValidation.js';
 import { TweetProcessor } from '../services/TweetProcessor.js';
 import { TelegramService } from '../services/TelegramService.js';
@@ -52,7 +47,6 @@ import { TelegramConfig } from './telegram.js';
 import { TelegramBotService } from '../telegram/bot/telegramBotService.js';
 import { LoggingConfig } from './loggingConfig.js';
 import { LoggerFactory } from '../logging/LoggerFactory.js';
-import { DefaultLogService } from '../logging/DefaultLogService.js';
 import { MongoDataValidator } from '../utils/mongoDataValidator.js';
 
 // Declare global container for DI
@@ -94,7 +88,7 @@ export function createContainer(): Container {
     return logger;
   });
   
-  // Bind LogService to DefaultLogService
+  // Bind LogService to Logger
   container.bind<LogService>(TYPES.LogService).toDynamicValue((context) => {
     return context.container.get<Logger>(TYPES.Logger);
   });
@@ -114,7 +108,6 @@ export function createContainer(): Container {
   container.bind<Storage>(TYPES.Storage).to(Storage).inSingletonScope();
   container.bind<ConfigStorage>(TYPES.ConfigStorage).to(ConfigStorage).inSingletonScope();
   // DatabaseManager is removed as we're using MongoDB exclusively
-  container.bind<MongoDBManager>(TYPES.MongoDBManager).to(MongoDBManager).inSingletonScope();
   container.bind<MessageStorage>(TYPES.MessageStorage).to(FileMessageStorage).inSingletonScope();
   container.bind<ErrorHandler>(TYPES.ErrorHandler).to(ErrorHandler).inSingletonScope();
   container.bind<RettiwtErrorHandler>(TYPES.RettiwtErrorHandler).to(RettiwtErrorHandler).inSingletonScope();
@@ -122,7 +115,6 @@ export function createContainer(): Container {
   container.bind<EnhancedMetricsManager>(TYPES.EnhancedMetricsManager).to(EnhancedMetricsManager).inSingletonScope();
   container.bind<EnhancedRateLimiter>(TYPES.EnhancedRateLimiter).to(EnhancedRateLimiter).inSingletonScope();
   container.bind<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor).to(EnhancedTweetMonitor).inSingletonScope();
-  container.bind<MonitoringDashboard>(TYPES.MonitoringDashboard).to(MonitoringDashboard).inSingletonScope();
   container.bind<MongoDataValidator>(TYPES.MongoDataValidator).to(MongoDataValidator).inSingletonScope();
   
   // Enhanced circuit breaker config
@@ -155,7 +147,6 @@ export function createContainer(): Container {
   container.bind<RettiwtSearchBuilder>(TYPES.RettiwtSearchBuilder).to(RettiwtSearchBuilder).inSingletonScope();
   container.bind<SearchStrategy>(TYPES.SearchStrategy).to(SearchStrategy).inSingletonScope();
   container.bind<SearchCacheManager>(TYPES.SearchCacheManager).to(SearchCacheManager).inSingletonScope();
-  container.bind<TweetMonitor>(TYPES.TweetMonitor).to(TweetMonitor).inSingletonScope();
   container.bind<TwitterService>(TYPES.TwitterService).to(TwitterService).inSingletonScope();
   container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
   container.bind<TelegramService>(TYPES.TelegramService).to(TelegramService).inSingletonScope();
@@ -187,7 +178,6 @@ export function createContainer(): Container {
   })).inSingletonScope();
 
   // Message Processing
-  container.bind<MessageProcessor>(TYPES.MessageProcessor).to(MessageProcessor).inSingletonScope();
   container.bind<MessageValidator>(TYPES.MessageValidator).to(MessageValidator).inSingletonScope();
   container.bind<TweetFormatter>(TYPES.TweetFormatter).to(EnhancedMessageFormatter).inSingletonScope();
 
