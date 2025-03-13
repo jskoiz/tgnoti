@@ -296,6 +296,49 @@ export class TwitterClient {
     }
   }
 
+  /**
+   * Get a tweet by its ID
+   * @param tweetId The ID of the tweet to fetch
+   * @returns The tweet object or null if not found
+   */
+  async getTweetById(tweetId: string): Promise<Tweet | null> {
+    try {
+      // Acquire rate limit token before making API call
+      await this.rateLimiter.acquireRateLimit('twitter', 'tweet_details');
+      
+      if (!this.client?.tweet?.details) {
+        throw new Error('Tweet API not available');
+      }
+
+      this.logger.info(`Fetching tweet details for ID: ${tweetId}`);
+      
+      const tweet = await this.client.tweet.details(tweetId);
+      
+      if (!tweet) {
+        this.logger.warn(`Tweet with ID ${tweetId} not found`);
+        return null;
+      }
+
+      this.logger.debug(`Successfully fetched tweet ${tweetId}`);
+      return mapRettiwtTweetToTweet(tweet);
+    } catch (error) {
+      this.logger.debug('TwitterClient: Error in getTweetById before handling', {
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        tweetId
+      });
+      
+      // Handle rate limit errors
+      if (error instanceof Error && 
+          (error.message.includes('TOO_MANY_REQUESTS') || error.message.includes('Rate limit'))) {
+        this.rateLimiter.handleRateLimitError('twitter', 'tweet_details');
+      }
+      
+      this.errorHandler.handle(error);
+      return null;
+    }
+  }
+
   private isValidApiKey(key: string): boolean {
     const isValid = typeof key === 'string' && key.length >= 32 && key.includes('auth_token=') && key.includes('twid=');
     

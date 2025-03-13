@@ -152,6 +152,28 @@ export class TelegramBot {
       
       // Register the filter command handler
       this.filterCommandHandler.registerHandlers(this.telegramBot);
+      
+      // Register callback query handler for refresh stats button
+      // This needs to be registered after the filter command handler to avoid conflicts
+      this.telegramBot.on('callback_query', async (query) => {
+        try {
+          // Only handle refresh callbacks here, filter callbacks are handled by FilterCommandHandler
+          if (query.data && query.data.startsWith('refresh:') && !query.data.startsWith('filter_')) {
+            this.logger.info(`Received refresh callback: ${query.data}`);
+            await this.handleRefreshCallback(query);
+          }
+        } catch (error) {
+          this.logger.error(`Failed to handle refresh callback: ${error instanceof Error ? error.message : String(error)}`);
+          try {
+            await this.telegramBot.answerCallbackQuery(query.id, {
+              text: 'Failed to refresh stats. Please try again.',
+              show_alert: true
+            });
+          } catch (answerError) {
+            this.logger.error(`Failed to answer callback query: ${answerError instanceof Error ? answerError.message : String(answerError)}`);
+          }
+        }
+      });
 
       if (!hasLock) {
         this.logger.error('Another instance of the bot is already running');
@@ -426,6 +448,85 @@ export class TelegramBot {
     } catch (error) {
       this.logger.error('Failed to verify bot admin status:', error instanceof Error ? error : new Error('Unknown error'));
       return false;
+    }
+  }
+
+  /**
+   * Handles the refresh stats button callback
+   */
+  private async handleRefreshCallback(query: TelegramBotApi.CallbackQuery): Promise<void> {
+    if (!query.data || !query.message) {
+      this.logger.error('Invalid refresh callback: missing data or message');
+      await this.telegramBot.answerCallbackQuery(query.id, {
+        text: 'Invalid refresh request',
+        show_alert: true
+      });
+      return;
+    }
+
+    // Extract tweet ID from callback data (format: "refresh:TWEET_ID")
+    const tweetId = query.data.split(':')[1];
+    if (!tweetId) {
+      this.logger.error(`Invalid refresh callback data format: ${query.data}`);
+      await this.telegramBot.answerCallbackQuery(query.id, {
+        text: 'Invalid tweet ID',
+        show_alert: true
+      });
+      return;
+    }
+
+    try {
+      // Show loading state to user
+      await this.telegramBot.answerCallbackQuery(query.id, {
+        text: 'Refreshing tweet stats...',
+        show_alert: false
+      });
+
+      this.logger.info(`Refreshing stats for tweet ${tweetId}`);
+
+      // Fetch the latest tweet data
+      const tweet = await this.twitterClient.getTweetById(tweetId);
+      
+      if (!tweet) {
+        this.logger.error(`Failed to fetch tweet ${tweetId} for refresh`);
+        await this.telegramBot.answerCallbackQuery(query.id, {
+          text: 'Could not fetch the latest tweet data',
+          show_alert: true
+        });
+        return;
+      }
+
+      // Create updated message with refreshed stats
+      const config: TweetMessageConfig = {
+        tweet,
+        quotedTweet: tweet.quotedTweet,
+        replyToTweet: tweet.replyToTweet,
+        mediaHandling: 'inline'
+      };
+
+      const updatedText = this.tweetFormatter.formatMessage(config);
+      const updatedButtons = this.tweetFormatter.createMessageButtons(tweet, config);
+
+      // Update the message with refreshed stats
+      await this.telegramBot.editMessageText(updatedText, {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: updatedButtons
+        }
+      });
+
+      this.logger.info(`Successfully refreshed stats for tweet ${tweetId}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error refreshing tweet stats: ${errorMessage}`, error as Error);
+      
+      await this.telegramBot.answerCallbackQuery(query.id, {
+        text: 'Failed to refresh stats. Please try again.',
+        show_alert: true
+      });
     }
   }
 
