@@ -5,7 +5,7 @@
  */
 
 import blessed from 'blessed';
-import { grid as Grid } from 'blessed-contrib';
+import * as contrib from 'blessed-contrib';
 import { MongoClient, Collection } from 'mongodb';
 import dotenv from 'dotenv';
 import moment from 'moment';
@@ -58,12 +58,14 @@ let rateLimitBox: any;
 let logBox: any;
 let tweetChart: any;
 let rateLimitChart: any;
+let categoryBarChart: any;
 
 // Chart data
 let tweetChartData: number[] = [];
 let tweetChartLabels: string[] = [];
 let rateLimitChartData: number[] = [];
 let rateLimitChartLabels: string[] = [];
+let categoryData: { titles: string[], data: number[] } = { titles: [], data: [] };
 
 /**
  * Initialize the dashboard
@@ -140,7 +142,7 @@ function createDashboardUI() {
   });
   
   // Create a grid
-  grid = new Grid({
+  grid = new contrib.grid({
     rows: 12,
     cols: 12,
     screen: screen
@@ -220,7 +222,7 @@ function createDashboardUI() {
   });
   
   // Topic breakdown box
-  topicBreakdownBox = grid.set(3, 0, 4, 6, blessed.box, {
+  topicBreakdownBox = grid.set(3, 0, 2, 6, blessed.box, {
     label: ' Topic Breakdown ',
     tags: true,
     border: {
@@ -235,8 +237,27 @@ function createDashboardUI() {
     content: 'Loading topic data...'
   });
   
+  // Category bar chart
+  categoryBarChart = grid.set(5, 0, 2, 6, contrib.bar, {
+    label: ' Tweets by Category ',
+    tags: true,
+    barWidth: 4,
+    barSpacing: 1,
+    xOffset: 0,
+    maxHeight: 9,
+    border: {
+      type: 'line'
+    },
+    style: {
+      fg: 'white',
+      border: {
+        fg: 'cyan'
+      }
+    }
+  });
+  
   // Tweet chart
-  tweetChart = grid.set(3, 6, 4, 6, blessed.line, {
+  tweetChart = grid.set(3, 6, 4, 6, contrib.line, {
     label: ' Tweets Over Time ',
     tags: true,
     border: {
@@ -256,7 +277,7 @@ function createDashboardUI() {
   });
   
   // Rate limit chart
-  rateLimitChart = grid.set(7, 0, 5, 6, blessed.line, {
+  rateLimitChart = grid.set(7, 0, 5, 6, contrib.line, {
     label: ' Rate Limits Over Time ',
     tags: true,
     border: {
@@ -340,6 +361,7 @@ async function refreshDashboard() {
     updateTweetCountBox();
     updateRateLimitBox();
     updateTopicBreakdownBox();
+    updateCategoryBarChart();
     updateTweetChart();
     updateRateLimitChart();
     
@@ -511,6 +533,30 @@ function updateTopicBreakdownBox() {
   }
   
   topicBreakdownBox.setContent(content);
+  
+  // Also update data for the category bar chart
+  categoryData.titles = [];
+  categoryData.data = [];
+  
+  // Take top 8 categories for the bar chart to avoid overcrowding
+  const topCategories = sortedTopics.slice(0, 8);
+  for (const [topicId, count] of topCategories) {
+    const topicName = topicNames[topicId] || `Topic ${topicId}`;
+    categoryData.titles.push(topicName);
+    categoryData.data.push(count);
+  }
+}
+
+/**
+ * Update the category bar chart
+ */
+function updateCategoryBarChart() {
+  if (categoryData.titles.length > 0) {
+    categoryBarChart.setData({
+      titles: categoryData.titles,
+      data: categoryData.data
+    });
+  }
 }
 
 /**
