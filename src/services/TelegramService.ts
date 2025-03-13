@@ -4,11 +4,12 @@ import { TYPES } from '../types/di.js';
 import { ConfigService } from './ConfigService.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import TelegramBot from 'node-telegram-bot-api';
+import { FormattedMessage } from '../types/telegram.js';
 
 @injectable()
 export class TelegramService {
   private bot: TelegramBot;
-  private messageQueue: { message: string, topicId: number }[] = [];
+  private messageQueue: { message: FormattedMessage, topicId: number }[] = [];
   private isProcessing: boolean = false;
   private queueInterval: NodeJS.Timeout | null = null;
   
@@ -31,8 +32,13 @@ export class TelegramService {
     this.logger.info('TelegramService initialized');
   }
   
-  async sendMessage(message: string, topicId: number): Promise<void> {
-    this.messageQueue.push({ message, topicId });
+  async sendMessage(message: string | FormattedMessage, topicId: number): Promise<void> {
+    // If message is a string, convert it to a FormattedMessage object
+    const formattedMessage = typeof message === 'string' 
+      ? { text: message } 
+      : message;
+    
+    this.messageQueue.push({ message: formattedMessage, topicId });
     this.metrics.increment('telegram.messages.queued');
     this.logger.info(`Message queued for topic ${topicId}, queue length: ${this.messageQueue.length}`);
   }
@@ -52,7 +58,7 @@ export class TelegramService {
       this.logger.info(`Sending message to Telegram topic ${topicId}, group ID: ${telegramConfig.api.groupId}`);
       this.logger.info(`Telegram bot token: ${telegramConfig.api.botToken.substring(0, 10)}...`);
       
-      const messageOptions = {
+      const baseOptions = {
         parse_mode: telegramConfig.messageOptions.parse_mode as 'HTML' | 'Markdown' | 'MarkdownV2' | undefined,
         disable_web_page_preview: telegramConfig.messageOptions.disable_web_page_preview,
         disable_notification: false,
@@ -61,10 +67,28 @@ export class TelegramService {
       };
       
       try {
-        await this.bot.sendMessage(telegramConfig.api.groupId, message, messageOptions);
-        this.logger.info(`Message successfully sent to Telegram topic ${topicId}`);
+        if (message.photo) {
+          // Send as photo with caption and buttons if provided
+          const photoOptions = {
+            ...baseOptions,
+            caption: message.caption || '',
+            reply_markup: message.reply_markup
+          };
+          
+          await this.bot.sendPhoto(telegramConfig.api.groupId, message.photo, photoOptions);
+          this.logger.info(`Photo message successfully sent to Telegram topic ${topicId}`);
+        } else {
+          // Send as regular text message with buttons if provided
+          const textOptions = {
+            ...baseOptions,
+            reply_markup: message.reply_markup
+          };
+          
+          await this.bot.sendMessage(telegramConfig.api.groupId, message.text || '', textOptions);
+          this.logger.info(`Text message successfully sent to Telegram topic ${topicId}`);
+        }
       } catch (sendError) {
-        this.logger.error(`Error in bot.sendMessage: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+        this.logger.error(`Error sending Telegram message: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
         throw sendError;
       }
       

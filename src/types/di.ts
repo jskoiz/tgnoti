@@ -40,7 +40,7 @@ const TYPES = {
   MessageStorage: Symbol.for('MessageStorage'),
 
   // Queue management
-  RateLimitedQueue: Symbol.for('RateLimitedQueue'),
+  // RateLimitedQueue has been replaced by EnhancedRateLimiter
   
   // Configuration
   LoggingConfig: Symbol.for('LoggingConfig'),

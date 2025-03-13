@@ -3,7 +3,7 @@ import { TYPES } from '../../types/di.js';
 import { Logger, LogContext } from '../../types/logger.js';
 import { Tweet, TweetFilter, SearchResponse, TweetUser, mapRettiwtTweetToTweet, mapRettiwtUserToTweetUser, SearchQueryConfig } from '../../types/twitter.js';
 import { MetricsManager } from '../monitoring/MetricsManager.js';
-import { RateLimitedQueue } from '../RateLimitedQueue.js';
+import { EnhancedRateLimiter } from '../../utils/enhancedRateLimiter.js';
 import { RettiwtKeyManager } from './rettiwtKeyManager.js';
 import { LoggingConfig } from '../../config/loggingConfig.js';
 import { Rettiwt } from 'rettiwt-api';
@@ -23,7 +23,7 @@ export class TwitterClient {
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.RateLimitedQueue) private queue: RateLimitedQueue,
+    @inject(TYPES.EnhancedRateLimiter) private rateLimiter: EnhancedRateLimiter,
     @inject(TYPES.RettiwtKeyManager) private keyManager: RettiwtKeyManager,
     @inject(TYPES.RettiwtErrorHandler) private errorHandler: RettiwtErrorHandler,
     @inject(TYPES.LoggingConfig) private loggingConfig: LoggingConfig,
@@ -31,11 +31,15 @@ export class TwitterClient {
   ) {
     this.logger.setComponent('TwitterClient');
     
-    // Get rate limit from config
+    // Get rate limit from config - no need to set it explicitly as EnhancedRateLimiter
+    // reads from ConfigService directly
     const config = this.environment.getConfig().twitter.rateLimit;
     const rateLimit = config.requestsPerSecond;
-    this.logger.info('Setting Twitter API rate limit', { rateLimit, safetyFactor: config.safetyFactor });
-    this.queue.setRateLimit(rateLimit);
+    this.logger.info('Twitter API rate limit configuration', { 
+      rateLimit, 
+      safetyFactor: config.safetyFactor
+    });
+    
     this.client = this.createClient();
   }
 
@@ -78,6 +82,9 @@ export class TwitterClient {
 
   async getUserDetails(username: string): Promise<TweetUser | null> {
     try {
+      // Acquire rate limit token before making API call
+      await this.rateLimiter.acquireRateLimit('twitter', 'user_details');
+      
       if (!this.client?.user?.details) {
         throw new Error('User API not available');
       }
@@ -95,6 +102,13 @@ export class TwitterClient {
         errorType: error instanceof Error ? error.constructor.name : typeof error,
         message: error instanceof Error ? error.message : String(error)
       });
+      
+      // Handle rate limit errors
+      if (error instanceof Error && 
+          (error.message.includes('TOO_MANY_REQUESTS') || error.message.includes('Rate limit'))) {
+        this.rateLimiter.handleRateLimitError('twitter', 'user_details');
+      }
+      
       this.errorHandler.handle(error);
       return null;
     }
@@ -105,35 +119,34 @@ export class TwitterClient {
     try {
       this.metrics.increment('twitter.search.attempt');
       
-      await this.queue.initialize();
-      const result = await this.queue.add(async () => {
-        const searchParams = this.sanitizeSearchParams(filter);
-        const response = await this.performSearch(searchParams);
-        
-        const searchResponse: SearchResponse = {
-          data: response,
-          meta: {
-            next_token: response.length >= (filter.maxResults || 100) ? 
-              this.generateNextToken(response[response.length - 1].id) : undefined
-          }
-        };
-
-        return searchResponse;
-      });
+      // Acquire rate limit token before proceeding
+      await this.rateLimiter.acquireRateLimit('twitter', 'search');
+      
+      const searchParams = this.sanitizeSearchParams(filter);
+      const response = await this.performSearch(searchParams);
+      
+      const searchResponse: SearchResponse = {
+        data: response,
+        meta: {
+          next_token: response.length >= (filter.maxResults || 100) ? 
+            this.generateNextToken(response[response.length - 1].id) : undefined
+        }
+      };
 
       this.metrics.increment('twitter.search.success');
       this.metrics.timing('twitter.search.duration', Date.now() - startTime);
-      return result;
+      return searchResponse;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       
-      // Only increment metrics for rate limit errors, let the error handler manage the rest
+      // Increment metrics for errors
       this.metrics.increment('twitter.search.error');
       this.metrics.timing('twitter.search.error_duration', Date.now() - startTime);
       
-      // For rate limits, just pass to error handler without additional logging
+      // Handle rate limit errors
       if (err.message?.includes('TOO_MANY_REQUESTS') || err.message?.includes('Rate limit')) {
         this.errorHandler.handle(error);
+        this.rateLimiter.handleRateLimitError('twitter', 'search');
       }
       throw err;
     }

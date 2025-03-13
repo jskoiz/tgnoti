@@ -159,9 +159,10 @@ export class EnhancedRateLimiter {
     const backoff = this.backoffMultiplier.get(key) || 1;
     const interval = baseInterval * backoff;
     
-    // Ensure we don't go below the minimum rate
-    const minRate = twitterConfig.rateLimit.minRate;
-    const maxInterval = minRate > 0 ? 1000 / minRate : 10000; // Default to 10 seconds if minRate is 0
+    // Ensure we don't go below a reasonable minimum rate
+    // Default minimum rate is 0.1 requests per second (10 seconds between requests)
+    const minRate = 0.1; // Hard-coded minimum rate since it's not in the config
+    const maxInterval = 10000; // Default to 10 seconds maximum interval
     
     return Math.min(interval, maxInterval);
   }
