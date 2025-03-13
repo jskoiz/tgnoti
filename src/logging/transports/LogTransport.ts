@@ -311,11 +311,7 @@ export class ConsoleTransport implements LogTransport {
     }
     
     
-    // Filter out verbose tweet search logs from TweetMonitor
-    if (component === 'TweetMonitor') {
-      if (entry.message.includes('Searching tweets for account:')) return undefined;
-      if (entry.message.includes('Found') && entry.message.includes('tweets for account')) return undefined;
-    }
+    // TweetMonitor has been removed, so this filter is no longer needed
     
     // Filter out verbose logs from Main component
     if (component === 'Main') {

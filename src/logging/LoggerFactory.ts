@@ -59,7 +59,6 @@ export class LoggerFactory {
       'TwitterClient': LogLevel.DEBUG,
       'TelegramMessageSender': LogLevel.DEBUG,
       'TelegramMessageQueue': LogLevel.DEBUG,
-      'MongoDBManager': LogLevel.INFO,
       'ConfigManager': LogLevel.INFO
     },
     globalMetadata: {

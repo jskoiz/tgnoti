@@ -6,14 +6,12 @@ const TYPES = {
   ConfigService: Symbol.for('ConfigService'),
   ConfigManager: Symbol.for('ConfigManager'),
   Storage: Symbol.for('Storage'),
-  MongoDBManager: Symbol.for('MongoDBManager'),
   ConfigStorage: Symbol.for('ConfigStorage'),
   MongoDBService: Symbol.for('MongoDBService'),
   StorageService: Symbol.for('StorageService'),
   TweetProcessor: Symbol.for('TweetProcessor'),
   TelegramService: Symbol.for('TelegramService'),
   TwitterService: Symbol.for('TwitterService'),
-  TweetMonitor: Symbol.for('TweetMonitor'),
   ErrorHandler: Symbol.for('ErrorHandler'),
   CircuitBreaker: Symbol.for('CircuitBreaker'),
   RettiwtErrorHandler: Symbol.for('RettiwtErrorHandler'),
@@ -23,7 +21,6 @@ const TYPES = {
   EnhancedMetricsManager: Symbol.for('EnhancedMetricsManager'),
   EnhancedRateLimiter: Symbol.for('EnhancedRateLimiter'),
   EnhancedTweetMonitor: Symbol.for('EnhancedTweetMonitor'),
-  MonitoringDashboard: Symbol.for('MonitoringDashboard'),
 
   // Twitter services
   TwitterClient: Symbol.for('TwitterClient'),
@@ -40,12 +37,10 @@ const TYPES = {
   TopicManager: Symbol.for('TopicManager'),
   TopicFilterManager: Symbol.for('TopicFilterManager'),
   FilterCommandHandler: Symbol.for('FilterCommandHandler'),
-  MessageFormatter: Symbol.for('MessageFormatter'),
   MessageStorage: Symbol.for('MessageStorage'),
 
   // Queue management
   RateLimitedQueue: Symbol.for('RateLimitedQueue'),
-  MessageProcessor: Symbol.for('MessageProcessor'),
   
   // Configuration
   LoggingConfig: Symbol.for('LoggingConfig'),
