@@ -1,11 +1,12 @@
 export const siteConfig = {
-  name: "Dashboard",
+  name: "Twitter Notification Dashboard",
   url: "https://dashboard.tremor.so",
-  description: "The only dashboard you will ever need.",
+  description: "Monitor and manage Twitter notifications sent to Telegram",
   baseLinks: {
     home: "/",
-    overview: "/overview",
-    details: "/details",
+    dashboard: "/dashboard",
+    tweets: "/tweets",
+    filters: "/filters",
     settings: {
       general: "/settings/general",
       billing: "/settings/billing",

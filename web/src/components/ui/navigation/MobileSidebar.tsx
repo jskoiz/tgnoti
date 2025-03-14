@@ -21,8 +21,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const navigation = [
-  { name: "Overview", href: siteConfig.baseLinks.overview, icon: RiHome2Line },
-  { name: "Details", href: siteConfig.baseLinks.details, icon: RiListCheck },
+  { name: "Dashboard", href: siteConfig.baseLinks.dashboard, icon: RiHome2Line },
+  { name: "Tweets", href: siteConfig.baseLinks.tweets, icon: RiListCheck },
   {
     name: "Settings",
     href: siteConfig.baseLinks.settings.general,
@@ -32,23 +32,23 @@ const navigation = [
 
 const shortcuts = [
   {
-    name: "Add new user",
-    href: "/settings/users",
+    name: "View Sent Tweets",
+    href: "/tweets?sentToTelegram=sent",
     icon: RiLinkM,
   },
   {
-    name: "Workspace usage",
-    href: "/settings/billing#billing-overview",
+    name: "View Rejected Tweets",
+    href: "/tweets?sentToTelegram=rejected",
     icon: RiLinkM,
   },
   {
-    name: "Cost spend control",
-    href: "/settings/billing#cost-spend-control",
+    name: "Manage Filters",
+    href: "/filters",
     icon: RiLinkM,
   },
   {
-    name: "Overview – Rows written",
-    href: "/overview#usage-overview",
+    name: "View Statistics",
+    href: "/dashboard",
     icon: RiLinkM,
   },
 ] as const
@@ -78,7 +78,7 @@ export default function MobileSidebar() {
         </DrawerTrigger>
         <DrawerContent className="sm:max-w-lg">
           <DrawerHeader>
-            <DrawerTitle>Retail Analytics</DrawerTitle>
+            <DrawerTitle>{siteConfig.name}</DrawerTitle>
           </DrawerHeader>
           <DrawerBody>
             <nav

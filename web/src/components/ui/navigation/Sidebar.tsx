@@ -4,8 +4,10 @@ import { cx, focusRing } from "@/lib/utils"
 import {
   RiHome2Line,
   RiLinkM,
-  RiListCheck,
   RiSettings5Line,
+  RiDashboardLine,
+  RiTwitterLine,
+  RiFilterLine,
 } from "@remixicon/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -17,8 +19,10 @@ import {
 import { UserProfileDesktop, UserProfileMobile } from "./UserProfile"
 
 const navigation = [
-  { name: "Overview", href: siteConfig.baseLinks.overview, icon: RiHome2Line },
-  { name: "Details", href: siteConfig.baseLinks.details, icon: RiListCheck },
+  { name: "Home", href: siteConfig.baseLinks.home, icon: RiHome2Line },
+  { name: "Dashboard", href: siteConfig.baseLinks.dashboard, icon: RiDashboardLine },
+  { name: "Tweets", href: siteConfig.baseLinks.tweets, icon: RiTwitterLine },
+  { name: "Filters", href: siteConfig.baseLinks.filters, icon: RiFilterLine },
   {
     name: "Settings",
     href: siteConfig.baseLinks.settings.general,
@@ -28,23 +32,23 @@ const navigation = [
 
 const shortcuts = [
   {
-    name: "Add new user",
-    href: "/settings/users",
+    name: "View Sent Tweets",
+    href: "/tweets?sentToTelegram=sent",
     icon: RiLinkM,
   },
   {
-    name: "Workspace usage",
-    href: "/settings/billing#billing-overview",
+    name: "View Rejected Tweets",
+    href: "/tweets?sentToTelegram=rejected",
     icon: RiLinkM,
   },
   {
-    name: "Cost spend control",
-    href: "/settings/billing#cost-spend-control",
+    name: "Manage Filters",
+    href: "/filters",
     icon: RiLinkM,
   },
   {
-    name: "Overview – Rows written",
-    href: "/overview#usage-overview",
+    name: "View Statistics",
+    href: "/dashboard",
     icon: RiLinkM,
   },
 ] as const

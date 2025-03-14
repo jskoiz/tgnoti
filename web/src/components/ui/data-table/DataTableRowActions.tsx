@@ -17,7 +17,7 @@ interface DataTableRowActionsProps<TData> {
 
 export function DataTableRowActions<
   TData,
->({}: DataTableRowActionsProps<TData>) {
+>(_props: DataTableRowActionsProps<TData>) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
