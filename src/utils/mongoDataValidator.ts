@@ -59,6 +59,18 @@ export class MongoDataValidator {
       if (!tweet.metadata.capturedAt) {
         errors.push('Missing capturedAt in metadata');
       }
+      // sentToTelegram is a required field but we'll add it if missing
+      if (tweet.metadata.sentToTelegram === undefined) {
+        tweet.metadata.sentToTelegram = false;
+      }
+      // Validate data type for sentToTelegram
+      if (typeof tweet.metadata.sentToTelegram !== 'boolean') {
+        errors.push('sentToTelegram must be a boolean');
+      }
+      // Validate rejectionReason if present
+      if (tweet.metadata.rejectionReason !== undefined && typeof tweet.metadata.rejectionReason !== 'string') {
+        errors.push('rejectionReason must be a string');
+      }
     }
 
     // Check processing status

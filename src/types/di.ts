@@ -37,6 +37,7 @@ const TYPES = {
   TopicManager: Symbol.for('TopicManager'),
   TopicFilterManager: Symbol.for('TopicFilterManager'),
   FilterCommandHandler: Symbol.for('FilterCommandHandler'),
+  StatsCommandHandler: Symbol.for('StatsCommandHandler'),
   MessageStorage: Symbol.for('MessageStorage'),
 
   // Queue management

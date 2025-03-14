@@ -25,6 +25,8 @@ export interface TweetDocument extends Tweet {
     topicId: string;
     capturedAt: Date;
     version: number;
+    sentToTelegram: boolean;  // Flag indicating if the tweet was sent to Telegram
+    rejectionReason?: string; // Reason why the tweet wasn't sent to Telegram (if applicable)
   };
 }
 

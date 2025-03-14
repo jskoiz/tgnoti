@@ -48,14 +48,36 @@ export class StorageService {
     }
   }
   
-  async storeTweet(tweet: Tweet, topicId: string): Promise<void> {
+  /**
+   * Store a tweet with information about whether it was sent to Telegram
+   * @param tweet The tweet to store
+   * @param topicId The topic ID
+   * @param sentToTelegram Whether the tweet was sent to Telegram
+   * @param rejectionReason Optional reason why the tweet wasn't sent to Telegram
+   */
+  async storeTweetWithStatus(tweet: Tweet, topicId: string, sentToTelegram: boolean, rejectionReason?: string): Promise<void> {
     try {
-      await this.mongoDb.saveTweet(tweet, topicId);
-      this.logger.debug('Tweet stored successfully', { tweetId: tweet.id, topicId });
+      await this.mongoDb.saveTweetWithStatus(tweet, topicId, sentToTelegram, rejectionReason);
+      this.logger.debug('Tweet stored successfully', { 
+        tweetId: tweet.id, 
+        topicId, 
+        sentToTelegram, 
+        rejectionReason: rejectionReason || 'N/A' 
+      });
     } catch (error) {
       this.logger.error('Failed to store tweet:', error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
+  }
+  
+  /**
+   * Store a tweet (legacy method, now calls storeTweetWithStatus with sentToTelegram=true)
+   * @param tweet The tweet to store
+   * @param topicId The topic ID
+   */
+  async storeTweet(tweet: Tweet, topicId: string): Promise<void> {
+    // For backward compatibility, call the new method with sentToTelegram=true
+    await this.storeTweetWithStatus(tweet, topicId, true);
   }
   
   async hasSeen(tweetId: string, topicId?: string): Promise<boolean> {

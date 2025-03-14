@@ -35,9 +35,15 @@ export class TweetProcessor {
       // Use debug level for individual tweet processing logs
       this.logger.debug(`[TWEET PROCESSING START] Processing tweet ${tweetId} from @${username} for topic ${topic.name} (${topicId})`);
       
+      // Store the tweet immediately with sentToTelegram=false
+      // We'll update this flag if it passes all filters
+      await this.storage.storeTweetWithStatus(tweet, topicId, false);
+      
       // 1. Check if tweet is already processed (duplicate check)
       if (await this.isDuplicate(tweet, topicId)) {
         this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} is a duplicate`);
+        // Update the stored tweet with rejection reason
+        await this.storage.storeTweetWithStatus(tweet, topicId, false, 'duplicate');
         return false;
       }
       
@@ -48,6 +54,8 @@ export class TweetProcessor {
         this.logger.debug(`Tweet ${tweetId} from @${username} outside time window of ${windowMinutes} minutes`);
         this.metrics.increment('tweets.age_validation.failed');
         this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} outside time window`);
+        // Update the stored tweet with rejection reason
+        await this.storage.storeTweetWithStatus(tweet, topicId, false, 'outside_time_window');
         return false;
       } else {
         const windowMinutes = topic.searchWindowMinutes || 
@@ -63,6 +71,8 @@ export class TweetProcessor {
         this.logger.debug(`Tweet ${tweetId} from @${username} failed validation`);
         this.metrics.increment('tweets.validation.failed');
         this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} failed validation`);
+        // Update the stored tweet with rejection reason
+        await this.storage.storeTweetWithStatus(tweet, topicId, false, 'validation_failed');
         return false;
       }
       
@@ -71,6 +81,8 @@ export class TweetProcessor {
         this.logger.debug(`Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
         this.metrics.increment('tweets.filter.failed');
         this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
+        // Update the stored tweet with rejection reason
+        await this.storage.storeTweetWithStatus(tweet, topicId, false, 'filter_mismatch');
         return false;
       }
       
@@ -80,8 +92,8 @@ export class TweetProcessor {
       // 6. Send to Telegram
       await this.telegram.sendMessage(formattedMessage, topic.id);
       
-      // 7. Mark as processed
-      await this.storage.storeTweet(tweet, topicId);
+      // 7. Mark as processed and update with sentToTelegram=true
+      await this.storage.storeTweetWithStatus(tweet, topicId, true);
       
       const processingTime = Date.now() - startTime;
       this.logger.debug(`[TWEET PROCESSING SUCCESS] Processed tweet ${tweetId} from @${username} for topic ${topic.name} in ${processingTime}ms`);
@@ -91,9 +103,18 @@ export class TweetProcessor {
       return true;
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      this.logger.error(`Error processing tweet ${tweetId} from @${username} for topic ${topic.name}:`, error instanceof Error ? error : new Error(String(error)));
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Error processing tweet ${tweetId} from @${username} for topic ${topic.name}:`, err);
       this.metrics.increment('tweets.processing.error');
       this.metrics.timing('tweets.processing.error_duration', processingTime);
+      
+      // Store the tweet with error status
+      try {
+        await this.storage.storeTweetWithStatus(tweet, topicId, false, `error: ${err.message}`);
+      } catch (storageError) {
+        this.logger.error(`Failed to store tweet with error status: ${storageError instanceof Error ? storageError.message : String(storageError)}`);
+      }
+      
       return false;
     }
   }

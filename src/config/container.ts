@@ -24,6 +24,7 @@ import { TelegramBot } from '../telegram/bot/telegramBot.js';
 import { TopicManager } from '../telegram/bot/TopicManager.js';
 import { TopicFilterManager } from '../telegram/bot/TopicFilterManager.js';
 import { FilterCommandHandler } from '../telegram/bot/FilterCommandHandler.js';
+import { StatsCommandHandler } from '../telegram/bot/StatsCommandHandler.js';
 import { RettiwtKeyManager } from '../core/twitter/rettiwtKeyManager.js';
 import { ErrorHandler } from '../utils/ErrorHandler.js';
 import { RettiwtErrorHandler } from '../core/twitter/RettiwtErrorHandler.js';
@@ -185,6 +186,7 @@ export function createContainer(): Container {
   container.bind<TopicManager>(TYPES.TopicManager).to(TopicManager).inSingletonScope();
   container.bind<TopicFilterManager>(TYPES.TopicFilterManager).to(TopicFilterManager).inSingletonScope();
   container.bind<FilterCommandHandler>(TYPES.FilterCommandHandler).to(FilterCommandHandler).inSingletonScope();
+  container.bind<StatsCommandHandler>(TYPES.StatsCommandHandler).to(StatsCommandHandler).inSingletonScope();
 
   // Validation
   container.bind<DateValidator>(TYPES.DateValidator).to(DateValidator).inSingletonScope();

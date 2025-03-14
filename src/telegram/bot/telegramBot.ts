@@ -12,6 +12,7 @@ import { MessageStorage, StoredMessage } from '../types/messageStorage.js';
 import { Tweet } from '../../types/twitter.js';
 import { TopicFilterManager } from './TopicFilterManager.js';
 import { FilterCommandHandler } from './FilterCommandHandler.js';
+import { StatsCommandHandler } from './StatsCommandHandler.js';
 import os from 'os';
 import fs from 'fs';
 
@@ -34,7 +35,8 @@ export class TelegramBot {
     @inject(TYPES.TelegramMessageQueue) private messageQueue: ITelegramMessageQueue,
     @inject(TYPES.TelegramMessageSender) private messageSender: ITelegramMessageSender,
     @inject(TYPES.TopicFilterManager) private topicFilterManager: TopicFilterManager,
-    @inject(TYPES.FilterCommandHandler) private filterCommandHandler: FilterCommandHandler
+    @inject(TYPES.FilterCommandHandler) private filterCommandHandler: FilterCommandHandler,
+    @inject(TYPES.StatsCommandHandler) private statsCommandHandler: StatsCommandHandler
   ) {
     this.logger.setComponent('TelegramBot');
     this.logger.info('TelegramBot constructor called');
@@ -141,7 +143,8 @@ export class TelegramBot {
           { command: 'status', description: 'Check system status' },
           { command: 'help', description: 'Show help message' },
           { command: 'user', description: 'Get details about a Twitter user' },
-          { command: 'filter', description: 'Manage filters for this topic' }
+          { command: 'filter', description: 'Manage filters for this topic' },
+          { command: 'stats', description: 'Show tweet statistics and analysis' }
         ]);
         
         this.logger.info('Bot commands registered');
@@ -266,6 +269,7 @@ export class TelegramBot {
           '/status \\- Check system status',
           '/help \\- Show this help message',
           '/user \\[username\\] \\- Get details about a Twitter user',
+          '/stats \\- Show tweet statistics and analysis',
           '',
           '*Filter Management:*',
           '/filter \\- Open interactive filter management menu',
@@ -336,6 +340,15 @@ export class TelegramBot {
       }
     });
 
+    this.telegramBot.onText(/\/stats/, async (msg) => {
+      try {
+        this.logger.debug('Received /stats command');
+        await this.statsCommandHandler.handleStatsCommand(this.telegramBot, msg);
+      } catch (error) {
+        this.logger.error('Failed to process stats command', error as Error);
+      }
+    });
+    
     // All filter commands are now handled by FilterCommandHandler
   }
 

@@ -116,7 +116,11 @@ export class MongoDBService {
         // Optimized indexes for common queries
         { key: { 'tweetBy.userName': 1 }, unique: false, name: 'idx_username' },
         { key: { 'metadata.capturedAt': -1, id: -1 }, unique: false, name: 'idx_recent_tweets' },
-        { key: { 'processingStatus.isAnalyzed': 1, 'processingStatus.attempts': 1 }, unique: false, name: 'idx_processing_status' }
+        { key: { 'processingStatus.isAnalyzed': 1, 'processingStatus.attempts': 1 }, unique: false, name: 'idx_processing_status' },
+        // New indexes for telegram status filtering
+        { key: { 'metadata.sentToTelegram': 1 }, unique: false, name: 'idx_sent_to_telegram' },
+        { key: { 'metadata.sentToTelegram': 1, 'metadata.rejectionReason': 1 }, unique: false, name: 'idx_rejection_reason' },
+        { key: { 'metadata.sentToTelegram': 1, 'metadata.capturedAt': -1 }, unique: false, name: 'idx_rejected_tweets_by_date' }
       ]);
       
       // Create indexes for topic filters collection
@@ -149,7 +153,11 @@ export class MongoDBService {
     }
   }
   
-  private getTweetsCollection(): Collection<TweetDocument> {
+  /**
+   * Get the tweets collection
+   * @returns MongoDB collection for tweets
+   */
+  getTweetsCollection(): Collection<TweetDocument> {
     if (!this.db) throw new Error('Database not initialized');
     
     // If MongoDB is not initialized, throw a more specific error
@@ -188,7 +196,14 @@ export class MongoDBService {
   
   // Tweet methods
   
-  async saveTweet(tweet: Tweet, topicId: string): Promise<void> {
+  /**
+   * Save a tweet with information about whether it was sent to Telegram
+   * @param tweet The tweet to save
+   * @param topicId The topic ID
+   * @param sentToTelegram Whether the tweet was sent to Telegram
+   * @param rejectionReason Optional reason why the tweet wasn't sent to Telegram
+   */
+  async saveTweetWithStatus(tweet: Tweet, topicId: string, sentToTelegram: boolean, rejectionReason?: string): Promise<void> {
     const startTime = Date.now();
     
     // If MongoDB is not initialized, log a warning and return
@@ -204,7 +219,9 @@ export class MongoDBService {
           source: 'twitter_api',
           topicId,
           capturedAt: new Date(),
-          version: 1
+          version: 1,
+          sentToTelegram,
+          rejectionReason
         },
         processingStatus: {
           isAnalyzed: false,
@@ -232,12 +249,22 @@ export class MongoDBService {
       
       this.metrics.increment('mongodb.tweets.saved');
       this.metrics.timing('mongodb.tweets.save_duration', Date.now() - startTime);
-      this.logger.debug(`Tweet ${tweet.id} saved for topic ${topicId}`);
+      this.logger.debug(`Tweet ${tweet.id} saved for topic ${topicId} (sent to Telegram: ${sentToTelegram}${rejectionReason ? `, reason: ${rejectionReason}` : ''})`);
     } catch (error) {
       this.metrics.increment('mongodb.tweets.save_error');
       this.logger.error(`Failed to save tweet ${tweet.id}:`, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
+  }
+  
+  /**
+   * Save a tweet (legacy method, now calls saveTweetWithStatus with sentToTelegram=true)
+   * @param tweet The tweet to save
+   * @param topicId The topic ID
+   */
+  async saveTweet(tweet: Tweet, topicId: string): Promise<void> {
+    // For backward compatibility, call the new method with sentToTelegram=true
+    await this.saveTweetWithStatus(tweet, topicId, true);
   }
   
   async hasSeen(tweetId: string, topicId?: string): Promise<boolean> {
@@ -276,6 +303,139 @@ export class MongoDBService {
     } catch (error) {
       this.logger.error(`Failed to get tweet ${tweetId}:`, error instanceof Error ? error : new Error(String(error)));
       throw error;
+    }
+  }
+  
+  /**
+   * Get tweets that were rejected and not sent to Telegram
+   * @param options Query options for filtering rejected tweets
+   * @returns Array of rejected tweets
+   */
+  async getRejectedTweets(options: {
+    startDate?: Date;
+    endDate?: Date;
+    topicId?: string;
+    rejectionReason?: string;
+    limit?: number;
+    skip?: number;
+  } = {}): Promise<TweetDocument[]> {
+    try {
+      // If MongoDB is not initialized, return empty array
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot get rejected tweets.');
+        return [];
+      }
+      
+      const collection = this.getTweetsCollection();
+      const query: any = { 'metadata.sentToTelegram': false };
+      
+      if (options.topicId) {
+        query['metadata.topicId'] = options.topicId;
+      }
+      
+      if (options.rejectionReason) {
+        query['metadata.rejectionReason'] = options.rejectionReason;
+      }
+      
+      if (options.startDate || options.endDate) {
+        query['metadata.capturedAt'] = {};
+        if (options.startDate) {
+          query['metadata.capturedAt'].$gte = options.startDate;
+        }
+        if (options.endDate) {
+          query['metadata.capturedAt'].$lte = options.endDate;
+        }
+      }
+      
+      this.logger.debug(`Getting rejected tweets with query:`, query);
+      
+      return await collection
+        .find(query)
+        .sort({ 'metadata.capturedAt': -1 })
+        .skip(options.skip || 0)
+        .limit(options.limit || 100)
+        .toArray();
+    } catch (error) {
+      this.logger.error('Failed to get rejected tweets:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  /**
+   * Get a summary of rejection reasons with counts
+   * @returns Array of rejection reasons with counts
+   */
+  async getRejectionReasonsSummary(): Promise<Array<{ reason: string; count: number }>> {
+    try {
+      // If MongoDB is not initialized, return empty array
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot get rejection reasons summary.');
+        return [];
+      }
+      
+      const collection = this.getTweetsCollection();
+      
+      const pipeline = [
+        { $match: { 'metadata.sentToTelegram': false } },
+        { $group: { 
+          _id: '$metadata.rejectionReason', 
+          count: { $sum: 1 } 
+        }},
+        { $sort: { count: -1 } },
+        { $project: {
+          _id: 0,
+          reason: { $ifNull: ['$_id', 'unknown'] },
+          count: 1
+        }}
+      ];
+      
+      const results = await collection.aggregate(pipeline).toArray();
+      return results.map(doc => ({
+        reason: doc.reason || 'unknown',
+        count: doc.count || 0
+      }));
+    } catch (error) {
+      this.logger.error('Failed to get rejection reasons summary:', error instanceof Error ? error : new Error(String(error)));
+      return [];
+    }
+  }
+  
+  /**
+   * Get a summary of rejected tweets by topic
+   * @returns Array of topics with rejected tweet counts
+   */
+  async getRejectedTweetsByTopic(): Promise<Array<{ topicId: string; count: number }>> {
+    try {
+      // If MongoDB is not initialized, return empty array
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot get rejected tweets by topic.');
+        return [];
+      }
+      
+      const collection = this.getTweetsCollection();
+      
+      const pipeline = [
+        { $match: { 'metadata.sentToTelegram': false } },
+        { $group: { 
+          _id: '$metadata.topicId', 
+          count: { $sum: 1 } 
+        }},
+        { $sort: { count: -1 } },
+        { $project: {
+          _id: 0,
+          topicId: '$_id',
+          count: 1
+        }}
+      ];
+      
+      const results = await collection.aggregate(pipeline).toArray();
+      return results.map(doc => ({
+        topicId: doc.topicId || 'unknown',
+        count: doc.count || 0
+      }));
+    } catch (error) {
+      this.logger.error('Failed to get rejected tweets by topic:', error instanceof Error ? error : new Error(String(error)));
+      return [];
     }
   }
   
