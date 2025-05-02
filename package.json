@@ -2,16 +2,16 @@
   "name": "tgnoti",
   "version": "1.0.0",
   "description": "A notification bridge between Twitter and Telegram",
-  "main": "dist/index.js",
+  "main": "build/index.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node build/index.js",
     "predev": "(pkill -f 'node --loader ts-node/esm' || true) && (pkill -f 'nodemon.*src/index.ts' || true) && rm -f telegram-bot.lock",
     "dev": "NODE_NO_WARNINGS=1 nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write 'src/**/*.ts'",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf build",
     "prebuild": "npm run clean",
     "test": "jest",
     "dashboard": "NODE_NO_WARNINGS=1 tsx tools/show-dashboard.ts",
@@ -29,13 +29,16 @@
   "dependencies": {
     "@types/node-telegram-bot-api": "^0.64.7",
     "axios": "^1.8.2",
+    "canvas": "^3.1.0",
     "chalk": "^5.4.1",
+    "chart.js": "^3.9.1",
+    "chartjs-node-canvas": "^4.1.6",
     "dotenv": "^16.4.7",
     "inversify": "^6.2.2",
     "mongodb": "^6.13.1",
     "node-telegram-bot-api": "^0.64.0",
     "reflect-metadata": "^0.2.2",
-    "rettiwt-api": "^4.2.0"
+    "rettiwt-api": "https://github.com/Rishikant181/Rettiwt-API.git#dev"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.25",

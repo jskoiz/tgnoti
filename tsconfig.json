@@ -3,8 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext", 
-    "outDir": "./dist",
-    "rootDir": "./",
+    "outDir": "./build",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -17,7 +16,7 @@
     "allowJs": true
   },
   "include": ["src/**/*", "tools/**/*"],
-  "exclude": ["node_modules", "dist", "src/tests/**/*"],
+  "exclude": ["node_modules", "dist", "build", "src/tests/**/*"],
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"

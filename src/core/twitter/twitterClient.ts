@@ -165,10 +165,12 @@ export class TwitterClient {
       minLikes: params.minLikes,
       minRetweets: params.minRetweets,
       minReplies: params.minReplies,
-      excludeRetweets: true,
-      excludeQuotes: true,
+      excludeRetweets: !params.retweets, // Use the retweets parameter from the filter
+      excludeQuotes: !params.quotes,     // Use the quotes parameter from the filter
       advancedFilters: {
-        include_replies: params.replies || false
+        include_replies: params.replies || false,
+        has_links: params.hasLinks,
+        has_media: params.hasMedia
       }
     };
 
@@ -180,6 +182,15 @@ export class TwitterClient {
       });
     }
     
+    if (params.mentions && params.mentions.length > 0) {
+      this.logger.info(`Searching for tweets MENTIONING: ${params.mentions.join(', ')}`, {
+        searchType: 'mentions',
+        users: params.mentions,
+        includeRetweets: params.retweets,
+        includeQuotes: params.quotes
+      });
+    }
+    
     // Enhanced logging to show complete search configuration
     this.logger.debug('Twitter search configuration', {
       fromUsers: searchConfig.fromUsers,
@@ -188,7 +199,10 @@ export class TwitterClient {
       startTime: searchConfig.startTime,
       endTime: searchConfig.endTime,
       language: searchConfig.language,
-      advancedFilters: searchConfig.advancedFilters
+      excludeRetweets: searchConfig.excludeRetweets,
+      excludeQuotes: searchConfig.excludeQuotes,
+      advancedFilters: searchConfig.advancedFilters,
+      cursor: params.paginationToken ? { nextToken: params.paginationToken } : undefined
     });
 
     // Check if we're in cooldown before attempting search
