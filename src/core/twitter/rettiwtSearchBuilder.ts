@@ -65,11 +65,25 @@ export class RettiwtSearchBuilder {
       const includeWords = this.buildComplexSearchCriteria(config);
       
       // Build filter with all options
-      const fromUsers = config.accounts?.map((a: string) => a.replace(/^@/, '')) || [];
+      const fromUsers = config.fromUsers || config.accounts?.map((a: string) => a.replace(/^@/, '')) || [];
       const mentions = config.mentions?.map((m: string) => m.replace(/^@/, '')) || [];
       
       // Ensure includeWords has at least one term by using account names if no keywords
       const searchTerms = config.keywords?.map((k: string) => k.toLowerCase()) || [];
+      
+      // Determine if we should include retweets and quotes based on config
+      const includeRetweets = config.excludeRetweets === false;
+      const includeQuotes = config.excludeQuotes === false;
+      
+      // Log the search configuration for debugging
+      this.logger.debug('Building search filter with configuration:', {
+        fromUsers,
+        mentions,
+        includeRetweets,
+        includeQuotes,
+        startDate: config.startTime,
+        endDate: config.endTime
+      });
       
       const filter = {
         fromUsers: fromUsers, // Use the full array of users
@@ -79,8 +93,8 @@ export class RettiwtSearchBuilder {
         startDate: config.startTime ? new Date(config.startTime) : undefined,
         endDate: config.endTime ? new Date(config.endTime) : undefined,
         links: false,
-        retweets: false,  // Always exclude retweets
-        quotes: false,    // Always exclude quotes
+        retweets: includeRetweets,  // Include retweets if specified
+        quotes: includeQuotes,      // Include quotes if specified
         minLikes: config.minLikes || 0,
         minRetweets: config.minRetweets || 0,
         minReplies: config.minReplies || 0,
@@ -92,6 +106,15 @@ export class RettiwtSearchBuilder {
         excludeWords: config.advancedFilters?.excludeWords,
         includePhrase: config.advancedFilters?.includePhrase
       };
+      
+      // Special handling for mentions search to be more inclusive
+      if (mentions.length > 0 && fromUsers.length === 0) {
+        this.logger.info(`Building mentions search for: ${mentions.join(', ')}`);
+        // For mentions search, we want to be as inclusive as possible
+        filter.retweets = true;  // Always include retweets for mentions
+        filter.quotes = true;    // Always include quotes for mentions
+        filter.replies = true;   // Always include replies for mentions
+      }
 
       this.logger.debug('Built filter from config:', {
         fromUsers: filter.fromUsers,

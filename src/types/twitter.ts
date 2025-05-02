@@ -53,6 +53,13 @@ export interface Tweet {
 export interface TweetFilter extends RettiwtTweetFilter {
   maxResults?: number;
   paginationToken?: string;
+  
+  // Additional properties for enhanced search capabilities
+  retweets?: boolean;      // Whether to include retweets in search results
+  quotes?: boolean;        // Whether to include quote tweets in search results
+  hasLinks?: boolean;      // Whether to filter tweets with links
+  hasMedia?: boolean;      // Whether to filter tweets with media
+  replies?: boolean;       // Whether to include replies in search results
 }
 
 // Search response type
@@ -121,7 +128,7 @@ export function mapRettiwtTweetToTweet(rettiwtTweet: RettiwtTweet): Tweet {
     viewCount: rettiwtTweet.viewCount,
     media: rettiwtTweet.media?.map(m => ({
       url: m.url,
-      type: m.type as 'photo' | 'video' | 'gif'
+      type: m.type as unknown as 'photo' | 'video' | 'gif'
     })),
     quotedTweet: quotedTweet ? mapRettiwtTweetToTweet(quotedTweet) : undefined,
     replyToTweet: replyToTweet ? mapRettiwtTweetToTweet(replyToTweet) : undefined,

@@ -43,11 +43,11 @@ export class SearchConfig {
     const searchWindowValidation: ConfigValidation<string> = {
       validate: (value: string) => {
         const num = Number(value);
-        return !isNaN(num) && num > 0 && num <= 60;
+        return !isNaN(num) && num > 0 && num <= 1440; // Allow up to 24 hours (1440 minutes)
       },
-      message: 'SEARCH_WINDOW_MINUTES must be a number between 1 and 60',
+      message: 'SEARCH_WINDOW_MINUTES must be a number between 1 and 1440 (24 hours)',
       example: 'SEARCH_WINDOW_MINUTES=10',
-      required: ['A positive number between 1 and 60']
+      required: ['A positive number between 1 and 1440 (24 hours)']
     };
     
     this.configManager.registerValidation('SEARCH_WINDOW_MINUTES', searchWindowValidation);
