@@ -10,6 +10,7 @@ import { EnhancedMetricsManager } from '../core/monitoring/EnhancedMetricsManage
 import { EnhancedCircuitBreaker } from '../utils/enhancedCircuitBreaker.js';
 import { EnhancedRateLimiter } from '../utils/enhancedRateLimiter.js';
 import { RettiwtErrorHandler } from '../core/twitter/RettiwtErrorHandler.js';
+import { AffiliateTrackingService } from './AffiliateTrackingService.js';
 import { MonitorState, AccountBatch, HealthStatus, CircuitBreakerState, CircuitBreakerConfig, EnhancedCircuitBreakerConfig } from '../types/monitoring-enhanced.js';
 // import { TopicConfig as MonitoringTopicConfig } from '../types/monitoring.js';
 
@@ -29,9 +30,10 @@ export class EnhancedTweetMonitor {
     @inject(TYPES.TwitterService) private twitter: TwitterService,
     @inject(TYPES.TweetProcessor) private processor: TweetProcessor,
     @inject(TYPES.EnhancedMetricsManager) private metrics: EnhancedMetricsManager,
-    @inject(TYPES.StorageService) private storage: StorageService, 
+    @inject(TYPES.StorageService) private storage: StorageService,
     @inject(TYPES.RettiwtErrorHandler) private rettiwtErrorHandler: RettiwtErrorHandler,
-    @inject(TYPES.EnhancedRateLimiter) private rateLimiter: EnhancedRateLimiter
+    @inject(TYPES.EnhancedRateLimiter) private rateLimiter: EnhancedRateLimiter,
+    @inject(TYPES.AffiliateTrackingService) private affiliateTrackingService: AffiliateTrackingService
   ) {
     this.logger.setComponent('EnhancedTweetMonitor');
     this.initializeCircuitBreakers();
@@ -322,6 +324,16 @@ export class EnhancedTweetMonitor {
       
       const duration = Date.now() - startTime;
       
+      // Check for affiliate changes during each monitoring cycle
+      try {
+        this.logger.info('Checking for affiliate changes...');
+        await this.checkAffiliateChanges();
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.logger.error('Error checking affiliate changes:', err);
+        this.metrics.increment('affiliates.check_errors');
+      }
+
       // Add [CYCLE COMPLETE] marker for enhanced visibility in logs
       this.logger.info(`[CYCLE COMPLETE] Search cycle finished: ${totalTweets} tweets found, ${processedTweets} processed in ${duration}ms`, { status: 'CYCLE_COMPLETE' });
       this.metrics.timing('monitor.cycle_duration', duration);
@@ -554,6 +566,21 @@ export class EnhancedTweetMonitor {
     }
     
     return adjustedInterval;
+  }
+  
+  /**
+   * Check for affiliate changes
+   */
+  private async checkAffiliateChanges(): Promise<void> {
+    try {
+      // Use the AffiliateTrackingService to check for changes
+      await this.affiliateTrackingService.checkAndReportAffiliateChanges();
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Error checking affiliate changes:', err);
+      this.metrics.increment('affiliates.check_errors');
+      throw error;
+    }
   }
   
   /**

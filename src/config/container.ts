@@ -16,6 +16,8 @@ import { ConfigService } from '../services/ConfigService.js';
 import { TwitterService } from '../services/TwitterService.js';
 import { MongoDBService } from '../services/MongoDBService.js';
 import { StorageService } from '../services/StorageService.js';
+import { TwitterAffiliateService } from '../services/TwitterAffiliateService.js';
+import { AffiliateTrackingService } from '../services/AffiliateTrackingService.js';
 import { TwitterClient } from '../core/twitter/twitterClient.js';
 import { RettiwtSearchBuilder } from '../core/twitter/rettiwtSearchBuilder.js';
 import { SearchStrategy } from '../core/twitter/searchStrategy.js';
@@ -151,6 +153,8 @@ export function createContainer(): Container {
   container.bind<TweetProcessor>(TYPES.TweetProcessor).to(TweetProcessor).inSingletonScope();
   container.bind<TelegramService>(TYPES.TelegramService).to(TelegramService).inSingletonScope();
   container.bind<RettiwtKeyManager>(TYPES.RettiwtKeyManager).to(RettiwtKeyManager).inSingletonScope();
+  container.bind<TwitterAffiliateService>(TYPES.TwitterAffiliateService).to(TwitterAffiliateService).inSingletonScope();
+  container.bind<AffiliateTrackingService>(TYPES.AffiliateTrackingService).to(AffiliateTrackingService).inSingletonScope();
 
   // Telegram Related
   container.bind<TelegramBotService>(TYPES.TelegramBotService).to(TelegramBotService).inSingletonScope();
@@ -227,6 +231,10 @@ export async function initializeContainer(): Promise<Container> {
   const enhancedMonitor = container.get<EnhancedTweetMonitor>(TYPES.EnhancedTweetMonitor);
   await enhancedMonitor.initialize();
   await enhancedMonitor.start();
+  
+  // Initialize AffiliateTrackingService
+  const affiliateTrackingService = container.get<AffiliateTrackingService>(TYPES.AffiliateTrackingService);
+  await affiliateTrackingService.initialize();
   
   return container;
 }

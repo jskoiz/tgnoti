@@ -6,6 +6,7 @@ import { ConfigService } from './ConfigService.js';
 import { TweetDocument, TopicFilterDocument, MongoConfig } from '../types/mongodb.js';
 import { Tweet } from '../types/twitter.js';
 import { TopicFilter } from '../types/topics.js';
+import { AffiliateDocument, Affiliate, AffiliateChange } from '../types/affiliates.js';
 import { MonitorState, MetricsSnapshot } from '../types/monitoring-enhanced.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { Config } from '../types/storage.js';
@@ -84,6 +85,12 @@ export class MongoDBService {
         this.logger.info(`Created collection: ${config.collections.topicFilters}`);
       }
       
+      // Ensure affiliates collection exists
+      if (!collectionNames.includes(config.collections.affiliates)) {
+        await this.db.createCollection(config.collections.affiliates);
+        this.logger.info(`Created collection: ${config.collections.affiliates}`);
+      }
+      
       // Ensure monitor state collection exists
       if (!collectionNames.includes('monitorState')) {
         await this.db.createCollection('monitorState');
@@ -142,6 +149,14 @@ export class MongoDBService {
       const configCollection = this.getConfigCollection();
       await configCollection.createIndex({ type: 1 }, { unique: true, name: 'idx_config_type' });
       
+      // Create indexes for affiliates collection
+      const affiliatesCollection = this.getAffiliatesCollection();
+      await affiliatesCollection.createIndexes([
+        { key: { userId: 1 }, unique: true, name: 'idx_affiliate_user_id' },
+        { key: { userName: 1 }, unique: false, name: 'idx_affiliate_user_name' },
+        { key: { lastChecked: 1 }, unique: false, name: 'idx_affiliate_last_checked' }
+      ]);
+      
       this.logger.info('MongoDB indexes created successfully');
     } catch (error) {
       this.logger.error('Failed to create indexes:', error instanceof Error ? error : new Error(String(error)));
@@ -182,6 +197,16 @@ export class MongoDBService {
   private getConfigCollection(): Collection<any> {
     if (!this.db) throw new Error('Database not initialized');
     return this.db.collection('config');
+  }
+  
+  private getAffiliatesCollection(): Collection<AffiliateDocument> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    // If MongoDB is not initialized, throw a more specific error
+    if (!this.client) throw new Error('MongoDB client not initialized. Check your MongoDB URI.');
+    
+    const config = this.configService.getMongoDBConfig();
+    return this.db.collection<AffiliateDocument>(config.collections.affiliates);
   }
   
   // ===== Tweet methods =====
@@ -702,5 +727,264 @@ export class MongoDBService {
     // Reset client and db references
     this.client = null;
     this.db = null;
+  }
+  
+  // ===== Affiliate methods =====
+  
+  /**
+   * Get affiliates for a specific Twitter user
+   * @param userId The Twitter user ID
+   * @returns The affiliate document or null if not found
+   */
+  async getAffiliates(userId: string): Promise<AffiliateDocument | null> {
+    try {
+      // If MongoDB is not initialized, return null
+      if (!this.client || !this.db) {
+        this.logger.warn(`MongoDB not initialized. Cannot get affiliates for user ${userId}.`);
+        return null;
+      }
+      
+      const collection = this.getAffiliatesCollection();
+      return await collection.findOne({ userId });
+    } catch (error) {
+      this.logger.error(`Failed to get affiliates for user ${userId}:`, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  /**
+   * Get affiliates for a Twitter user by username
+   * @param userName The Twitter username
+   * @returns The affiliate document or null if not found
+   */
+  async getAffiliatesByUsername(userName: string): Promise<AffiliateDocument | null> {
+    try {
+      // If MongoDB is not initialized, return null
+      if (!this.client || !this.db) {
+        this.logger.warn(`MongoDB not initialized. Cannot get affiliates for username ${userName}.`);
+        return null;
+      }
+      
+      const collection = this.getAffiliatesCollection();
+      return await collection.findOne({ userName: userName.toLowerCase() });
+    } catch (error) {
+      this.logger.error(`Failed to get affiliates for username ${userName}:`, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  /**
+   * Save affiliates for a Twitter user
+   * @param userId The Twitter user ID
+   * @param userName The Twitter username
+   * @param affiliates The list of affiliates
+   * @returns An array of affiliate changes (added or removed)
+   */
+  async saveAffiliates(userId: string, userName: string, affiliates: Affiliate[]): Promise<AffiliateChange[]> {
+    try {
+      const startTime = Date.now();
+      
+      // If MongoDB is not initialized, log a warning and return
+      if (!this.client || !this.db) {
+        this.logger.warn(`MongoDB not initialized. Affiliates for user ${userId} not saved.`);
+        return [];
+      }
+      
+      const collection = this.getAffiliatesCollection();
+      const now = new Date();
+      
+      // Get existing document if any
+      const existingDoc = await collection.findOne({ userId });
+      let changes: AffiliateChange[] = [];
+      
+      if (existingDoc) {
+        // Update existing affiliates
+        changes = this.detectAffiliateChanges(existingDoc.affiliates, affiliates);
+        
+        // Process the changes to update the affiliates array
+        const updatedAffiliates = this.mergeAffiliates(existingDoc.affiliates, affiliates, changes);
+        
+        await collection.updateOne(
+          { userId },
+          {
+            $set: {
+              affiliates: updatedAffiliates,
+              lastChecked: now,
+              userName: userName.toLowerCase() // Update username in case it changed
+            }
+          }
+        );
+        
+        this.logger.info(`Updated affiliates for user ${userId} (${userName}), found ${changes.length} changes`);
+      } else {
+        // Create new document
+        const newDoc: AffiliateDocument = {
+          userId,
+          userName: userName.toLowerCase(),
+          affiliates: affiliates.map(a => ({
+            ...a,
+            addedAt: now,
+            isActive: true
+          })),
+          lastChecked: now,
+          metadata: {
+            source: 'twitter_api',
+            capturedAt: now,
+            version: 1
+          }
+        };
+        
+        await collection.insertOne(newDoc);
+        
+        // All affiliates are new
+        changes = affiliates.map(affiliate => ({
+          type: 'added',
+          affiliate,
+          timestamp: now
+        }));
+        
+        this.logger.info(`Created new affiliates document for user ${userId} (${userName}) with ${affiliates.length} affiliates`);
+      }
+      
+      this.metrics.timing('mongodb.affiliates.save_duration', Date.now() - startTime);
+      return changes;
+    } catch (error) {
+      this.logger.error(`Failed to save affiliates for user ${userId}:`, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  /**
+   * Get all tracked affiliate accounts
+   * @returns Array of affiliate documents
+   */
+  async getAllAffiliateAccounts(): Promise<AffiliateDocument[]> {
+    try {
+      // If MongoDB is not initialized, return empty array
+      if (!this.client || !this.db) {
+        this.logger.warn('MongoDB not initialized. Cannot get affiliate accounts.');
+        return [];
+      }
+      
+      const collection = this.getAffiliatesCollection();
+      return await collection.find().toArray();
+    } catch (error) {
+      this.logger.error('Failed to get all affiliate accounts:', error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+  
+  /**
+   * Detect changes between existing and current affiliates
+   * @param existing Existing affiliates from the database
+   * @param current Current affiliates from the API
+   * @returns Array of affiliate changes
+   */
+  private detectAffiliateChanges(
+    existing: AffiliateDocument['affiliates'],
+    current: Affiliate[]
+  ): AffiliateChange[] {
+    const changes: AffiliateChange[] = [];
+    const now = new Date();
+    
+    // Find removed affiliates (in existing but not in current)
+    // Create a map of userIds to userNames for case-insensitive comparison
+    const currentUserMap = new Map<string, string>();
+    current.forEach(a => {
+      currentUserMap.set(a.userId.toLowerCase(), a.userName.toLowerCase());
+    });
+    
+    const removedAffiliates = existing
+      .filter(a => a.isActive && !currentUserMap.has(a.userId.toLowerCase()));
+    
+    for (const affiliate of removedAffiliates) {
+      changes.push({
+        type: 'removed',
+        affiliate: {
+          userId: affiliate.userId,
+          userName: affiliate.userName,
+          fullName: affiliate.fullName,
+          followersCount: affiliate.followersCount,
+          followingsCount: affiliate.followingsCount,
+          isVerified: affiliate.isVerified
+        },
+        timestamp: now
+      });
+    }
+    
+    // Find added affiliates (in current but not in existing or not active)
+    // Create a map of userIds to userNames for case-insensitive comparison
+    const existingUserMap = new Map<string, string>();
+    existing.filter(a => a.isActive).forEach(a => {
+      existingUserMap.set(a.userId.toLowerCase(), a.userName.toLowerCase());
+    });
+    
+    const addedAffiliates = current.filter(a => !existingUserMap.has(a.userId.toLowerCase()));
+    
+    for (const affiliate of addedAffiliates) {
+      changes.push({
+        type: 'added',
+        affiliate,
+        timestamp: now
+      });
+    }
+    
+    return changes;
+  }
+  
+  /**
+   * Merge existing affiliates with current affiliates, applying changes
+   * @param existing Existing affiliates from the database
+   * @param current Current affiliates from the API
+   * @param changes Detected changes
+   * @returns Updated affiliates array
+   */
+  private mergeAffiliates(
+    existing: AffiliateDocument['affiliates'],
+    current: Affiliate[],
+    changes: AffiliateChange[]
+  ): AffiliateDocument['affiliates'] {
+    const now = new Date();
+    const result = [...existing]; // Clone the existing array
+    
+    // Process removals
+    const removedIds = changes
+      .filter(c => c.type === 'removed')
+      .map(c => c.affiliate.userId);
+    
+    for (const affiliate of result) {
+      // Case-insensitive comparison for user IDs
+      if (removedIds.some(id => id.toLowerCase() === affiliate.userId.toLowerCase()) && affiliate.isActive) {
+        affiliate.isActive = false;
+        affiliate.removedAt = now;
+      }
+    }
+    
+    // Process additions
+    const addedChanges = changes.filter(c => c.type === 'added');
+    for (const change of addedChanges) {
+      // Check if this affiliate was previously tracked but inactive
+      // Use case-insensitive comparison for user IDs
+      const existingIndex = result.findIndex(a =>
+        a.userId.toLowerCase() === change.affiliate.userId.toLowerCase());
+      
+      if (existingIndex >= 0) {
+        // Update existing record
+        result[existingIndex] = {
+          ...change.affiliate,
+          addedAt: now,
+          isActive: true
+        };
+      } else {
+        // Add new record
+        result.push({
+          ...change.affiliate,
+          addedAt: now,
+          isActive: true
+        });
+      }
+    }
+    
+    return result;
   }
 }

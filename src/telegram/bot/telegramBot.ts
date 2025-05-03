@@ -12,6 +12,8 @@ import { MessageStorage, StoredMessage } from '../types/messageStorage.js';
 import { Tweet } from '../../types/twitter.js';
 import { TopicFilterManager } from './TopicFilterManager.js';
 import { FilterCommandHandler } from './FilterCommandHandler.js';
+import { AffiliateTrackingService } from '../../services/AffiliateTrackingService.js';
+import { TwitterAffiliateService } from '../../services/TwitterAffiliateService.js';
 import os from 'os';
 import fs from 'fs';
 
@@ -34,7 +36,9 @@ export class TelegramBot {
     @inject(TYPES.TelegramMessageQueue) private messageQueue: ITelegramMessageQueue,
     @inject(TYPES.TelegramMessageSender) private messageSender: ITelegramMessageSender,
     @inject(TYPES.TopicFilterManager) private topicFilterManager: TopicFilterManager,
-    @inject(TYPES.FilterCommandHandler) private filterCommandHandler: FilterCommandHandler
+    @inject(TYPES.FilterCommandHandler) private filterCommandHandler: FilterCommandHandler,
+    @inject(TYPES.AffiliateTrackingService) private affiliateTrackingService: AffiliateTrackingService,
+    @inject(TYPES.TwitterAffiliateService) private twitterAffiliateService: TwitterAffiliateService
   ) {
     this.logger.setComponent('TelegramBot');
     this.logger.info('TelegramBot constructor called');
@@ -141,7 +145,9 @@ export class TelegramBot {
           { command: 'status', description: 'Check system status' },
           { command: 'help', description: 'Show help message' },
           { command: 'user', description: 'Get details about a Twitter user' },
-          { command: 'filter', description: 'Manage filters for this topic' }
+          { command: 'filter', description: 'Manage filters for this topic' },
+          { command: 'affiliates', description: 'Show summary of tracked affiliates' },
+          { command: 'account', description: 'Show affiliates for a specific account' }
         ]);
         
         this.logger.info('Bot commands registered');
@@ -270,6 +276,10 @@ export class TelegramBot {
           '*Filter Management:*',
           '/filter \\- Open interactive filter management menu',
           '',
+          '*Affiliate Tracking:*',
+          '/affiliates \\- Show summary of all tracked affiliates',
+          '/account \\[username\\] \\- Show affiliates for a specific account',
+          '',
           '*Note:* Filter commands only work in topics\\.'
         ].join('\n');
 
@@ -336,6 +346,72 @@ export class TelegramBot {
       }
     });
 
+    // Add affiliate commands
+    this.telegramBot.onText(/\/affiliates/, async (msg) => {
+      try {
+        this.logger.debug('Received /affiliates command');
+        const summary = await this.affiliateTrackingService.generateAffiliateSummary();
+        await this.queueMessage({
+          text: summary,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          message_thread_id: msg?.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error('Failed to send affiliates summary', error as Error);
+      }
+    });
+    
+    // Support both username and ID formats
+    this.telegramBot.onText(/\/account\s+(@?\w+)/, async (msg, match) => {
+      if (!match) return;
+      
+      const userInput = match[1];
+      const isUsername = userInput.startsWith('@') || !userInput.match(/^\d+$/);
+      
+      try {
+        this.logger.debug(`Fetching affiliates for ${userInput}`);
+        
+        let userId = userInput;
+        let userName = userInput;
+        
+        // If username provided, get the user ID first
+        if (isUsername) {
+          const normalizedUsername = userInput.replace('@', '');
+          const user = await this.twitterClient.getUserDetails(normalizedUsername);
+          
+          if (!user) {
+            await this.queueMessage({
+              text: `❌ User ${userInput} not found`,
+              parse_mode: 'HTML',
+              message_thread_id: msg?.message_thread_id
+            });
+            return;
+          }
+          
+          userId = user.id;
+          userName = user.userName;
+        }
+        
+        const affiliates = await this.twitterAffiliateService.getUserAffiliates(userId);
+        const formattedMessage = this.affiliateTrackingService.formatAffiliatesList(userName, affiliates);
+        
+        await this.queueMessage({
+          text: formattedMessage,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          message_thread_id: msg?.message_thread_id
+        });
+      } catch (error) {
+        this.logger.error(`Failed to get affiliates for ${userInput}`, error as Error);
+        await this.queueMessage({
+          text: `❌ Failed to get affiliates. Please try again later.`,
+          parse_mode: 'HTML',
+          message_thread_id: msg?.message_thread_id
+        });
+      }
+    });
+    
     // All filter commands are now handled by FilterCommandHandler
   }
 

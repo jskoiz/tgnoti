@@ -2,6 +2,11 @@ import { TopicConfig, TopicFilter, TopicDetails, TopicNotification } from '../ty
 
 
 export const TOPIC_CONFIG: Record<string, TopicDetails> = {
+  AFFILIATE_MONITORING: {
+    id: 6545,
+    notification: { enabled: true },
+    filters: []
+  },
   COMPETITOR_TWEETS: {
     id: 12111,
     notification: { enabled: true },
@@ -106,6 +111,31 @@ export const TOPIC_CONFIG: Record<string, TopicDetails> = {
   },
 };
 
+/**
+ * Configuration for affiliate tracking
+ * Specifies which Twitter accounts to track for affiliate changes
+ */
+export const AFFILIATE_TRACKING_CONFIG = {
+  // List of Twitter accounts to track (usernames)
+  trackedAccounts: [
+    'trojanonsolana',
+    'trojantrading',
+    'tradewithPhoton',
+    'bullx_io',
+    'gmgnai',
+    'AxiomExchange',
+    'tradeonnova',
+    'bloomtradingbot',
+    'bonkbot_io',
+    'soltradingbot',
+    'maestrobots',
+    'BananaGunBot',
+    'SlingshotCrypto',
+    'VECTORDOTFUN',
+    'moonshot'
+  ]
+};
+
 export function getTopicById(id: number): [string, TopicDetails] | undefined {
   const entry = Object.entries(TOPIC_CONFIG).find(([_, details]) => details.id === id);
   return entry;
@@ -122,6 +152,9 @@ export const telegramConfig = {
     },
     KOL_MONITORING: {
       id: 6531
+    },
+    AFFILIATE_MONITORING: {
+      id: 6545
     }
   }
 };

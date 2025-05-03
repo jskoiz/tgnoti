@@ -2,6 +2,8 @@ import { TweetEntities, TweetMedia, Tweet as RettiwtTweet, User as RettiwtUser, 
 
 // Our internal user type
 export interface TweetUser {
+  id: string;         // Twitter user ID
+  userId: string;     // Alias for id for backward compatibility
   userName: string;
   displayName: string;
   fullName: string;
@@ -85,6 +87,8 @@ function getVerifiedType(user: RettiwtUser): 'none' | 'blue' | 'business' | 'gov
 // Mapping functions
 export function mapRettiwtUserToTweetUser(user: RettiwtUser): TweetUser {
   return {
+    id: user.id,
+    userId: user.id,  // Add userId as alias for id
     userName: user.userName.toLowerCase(), // Normalize username to lowercase
     displayName: user.fullName,
     fullName: user.fullName,

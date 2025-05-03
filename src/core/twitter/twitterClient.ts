@@ -2,6 +2,7 @@ import { injectable, inject } from 'inversify';
 import { TYPES } from '../../types/di.js';
 import { Logger, LogContext } from '../../types/logger.js';
 import { Tweet, TweetFilter, SearchResponse, TweetUser, mapRettiwtTweetToTweet, mapRettiwtUserToTweetUser, SearchQueryConfig } from '../../types/twitter.js';
+import { Affiliate } from '../../types/affiliates.js';
 import { MetricsManager } from '../monitoring/MetricsManager.js';
 import { EnhancedRateLimiter } from '../../utils/enhancedRateLimiter.js';
 import { RettiwtKeyManager } from './rettiwtKeyManager.js';
@@ -147,6 +148,9 @@ export class TwitterClient {
       if (err.message?.includes('TOO_MANY_REQUESTS') || err.message?.includes('Rate limit')) {
         this.errorHandler.handle(error);
         this.rateLimiter.handleRateLimitError('twitter', 'search');
+      } else {
+        // For other errors, pass to the error handler
+        this.errorHandler.handle(error);
       }
       throw err;
     }
@@ -231,23 +235,85 @@ export class TwitterClient {
       this.logger.debug(`Client state before search: hasClient=${!!this.client}, hasSearchMethod=${!!this.client?.tweet?.search}`);
       
       try {
-       const result = await this.client.tweet.search(searchConfig) as RettiwtSearchResponse;
-        
-        // Log successful search
-        this.logger.debug(`Search successful, received ${result?.list?.length || 0} results`);
-        
-        if (!result?.list) {
-          this.logger.warn(`Invalid search response: missing list property. Available keys: ${result ? Object.keys(result).join(', ') : 'null'}`);
-          throw new Error('Invalid search response');
+        // Try the search with error handling
+        try {
+          const result = await this.client.tweet.search(searchConfig) as RettiwtSearchResponse;
+          
+          // Log successful search
+          this.logger.debug(`Search successful, received ${result?.list?.length || 0} results`);
+          
+          if (!result?.list) {
+            this.logger.warn(`Invalid search response: missing list property. Available keys: ${result ? Object.keys(result).join(', ') : 'null'}`);
+            throw new Error('Invalid search response');
+          }
+          
+          // Log first result for debugging
+          if (result.list.length > 0) {
+            const firstTweet = result.list[0];
+            this.logger.debug(`First tweet in results: ID=${firstTweet.id || 'unknown'}, by @${firstTweet.user?.username || 'unknown'}`);
+          }
+          
+          return result.list.map(tweet => mapRettiwtTweetToTweet(tweet));
+        } catch (searchError) {
+          // Check if it's a 404 error
+          if (searchError instanceof Error &&
+              (searchError.message.includes('404') ||
+               (searchError as any)?.response?.status === 404)) {
+            
+            this.logger.warn('Search endpoint returned 404, trying alternative approach');
+            
+            // If we're searching for tweets FROM users, try to get user timeline instead
+            if (searchConfig.fromUsers && searchConfig.fromUsers.length > 0) {
+              const tweets: Tweet[] = [];
+              
+              // For each user, try to get their timeline
+              for (const username of searchConfig.fromUsers) {
+                try {
+                  this.logger.info(`Trying to get timeline for user: ${username}`);
+                  
+                  // Get user details first to get the ID
+                  const user = await this.client.user.details(username);
+                  if (!user) {
+                    this.logger.warn(`User ${username} not found`);
+                    continue;
+                  }
+                  
+                  // Get user timeline
+                  const timeline = await this.client.user.timeline(user.id);
+                  if (timeline && Array.isArray(timeline.list)) {
+                    this.logger.info(`Found ${timeline.list.length} tweets in timeline for ${username}`);
+                    
+                    // Map and filter tweets based on date if needed
+                    const mappedTweets = timeline.list
+                      .map(tweet => mapRettiwtTweetToTweet(tweet))
+                      .filter(tweet => {
+                        if (!searchConfig.startTime) return true;
+                        const tweetDate = new Date(tweet.createdAt);
+                        const startDate = new Date(searchConfig.startTime);
+                        return tweetDate >= startDate;
+                      });
+                    
+                    tweets.push(...mappedTweets);
+                  }
+                } catch (timelineError) {
+                  this.logger.error(`Error getting timeline for ${username}:`, timelineError instanceof Error ? timelineError : new Error(String(timelineError)));
+                }
+              }
+              
+              if (tweets.length > 0) {
+                this.logger.info(`Fallback method found ${tweets.length} tweets`);
+                return tweets;
+              }
+            }
+            
+            // If we couldn't get any tweets with the fallback, rethrow the original error
+            throw searchError;
+          }
+          
+          // For other errors, just rethrow
+          this.logger.error(`Search API call failed: ${searchError instanceof Error ? searchError.message : String(searchError)}`);
+          throw searchError;
         }
-        
-        // Log first result for debugging
-        if (result.list.length > 0) {
-          const firstTweet = result.list[0];
-          this.logger.debug(`First tweet in results: ID=${firstTweet.id || 'unknown'}, by @${firstTweet.user?.username || 'unknown'}`);
-        }
-        
-        return result.list.map(tweet => mapRettiwtTweetToTweet(tweet));
       } catch (searchError) {
         // Specific error handling for the search call
         this.logger.error(`Search API call failed: ${searchError instanceof Error ? searchError.message : String(searchError)}`);
@@ -366,5 +432,60 @@ export class TwitterClient {
     });
     
     return isValid;
+  }
+  
+  /**
+   * Get affiliates for a Twitter user
+   * @param userId The Twitter user ID
+   * @param count Maximum number of affiliates to fetch
+   * @param cursor Pagination cursor for fetching more affiliates
+   * @returns Array of affiliates
+   */
+  async getUserAffiliates(userId: string, count: number = 50, cursor?: string): Promise<Affiliate[]> {
+    try {
+      // Acquire rate limit token before making API call
+      await this.rateLimiter.acquireRateLimit('twitter', 'user_affiliates');
+      
+      if (!this.client?.user?.affiliates) {
+        throw new Error('Affiliates API not available');
+      }
+
+      this.logger.info(`Fetching affiliates for user ID: ${userId}, count: ${count}`);
+      
+      const data = await this.client.user.affiliates(userId, count, cursor);
+      
+      if (!data || !(data as any).list) {
+        this.logger.warn(`No affiliates found for user ${userId}`);
+        return [];
+      }
+      
+      // Map to our Affiliate type
+      const affiliates = (data as any).list.map((user: any) => ({
+        userId: user.id,
+        userName: user.userName.toLowerCase(),
+        fullName: user.fullName,
+        followersCount: user.followersCount,
+        followingsCount: user.followingsCount,
+        isVerified: user.isVerified
+      }));
+      
+      this.logger.info(`Found ${affiliates.length} affiliates for user ${userId}`);
+      return affiliates;
+    } catch (error) {
+      this.logger.debug('TwitterClient: Error in getUserAffiliates before handling', {
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        userId
+      });
+      
+      // Handle rate limit errors
+      if (error instanceof Error &&
+          (error.message.includes('TOO_MANY_REQUESTS') || error.message.includes('Rate limit'))) {
+        this.rateLimiter.handleRateLimitError('twitter', 'user_affiliates');
+      }
+      
+      this.errorHandler.handle(error);
+      throw error;
+    }
   }
 }

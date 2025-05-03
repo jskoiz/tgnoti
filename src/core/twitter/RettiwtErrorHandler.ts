@@ -93,6 +93,17 @@ export class RettiwtErrorHandler implements IErrorHandler {
       });
       this.baseHandler.handleApiError(new RateLimitError(message, retryAfter), 'Rettiwt');
       await this.handleRateLimit(retryAfter);
+    } else if (this.isNotFoundError(errorObj)) {
+      // Handle 404 errors differently - these are likely API endpoint issues
+      this.logService.error(`API Endpoint Error (404): ${message}`);
+      this.logService.debug('API Endpoint Error details', {
+        errorStatus: errorObj.status,
+        errorCode: errorObj.code,
+        endpoint: (error as any)?.config?.url || 'unknown'
+      });
+      
+      // Don't increment retry count for 404 errors as they're not transient
+      this.baseHandler.handleApiError(new ApiError(404, `API Endpoint Not Found: ${message}`), 'Rettiwt');
     } else if (this.isRetryableError(errorObj)) {
       if (this.retryCount < this.MAX_RETRIES) {
         const delay = this.calculateBackoff();
@@ -125,6 +136,15 @@ export class RettiwtErrorHandler implements IErrorHandler {
     }
     
     return false;
+  }
+
+  /**
+   * Check if the error is a 404 Not Found error, which indicates an API endpoint issue
+   * rather than a rate limit or server error
+   */
+  private isNotFoundError(error: { status?: number; code?: number; message?: string }): boolean {
+    return error.status === 404 || error.code === 404 ||
+           (typeof error.message === 'string' && error.message.includes('404'));
   }
 
   private isRetryableError(error: { status?: number; code?: number }): boolean {

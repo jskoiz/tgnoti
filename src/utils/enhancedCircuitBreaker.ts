@@ -136,6 +136,18 @@ export class EnhancedCircuitBreaker {
       this.notifyStateChange();
     }
   }
+  
+  /**
+   * Force reset all circuit breakers - use this to recover from persistent failures
+   * This is a more aggressive reset that clears all state
+   */
+  forceReset(): void {
+    this.logger.warn(`Force resetting circuit breaker from ${this.failures} failures`);
+    this.failures = 0;
+    this.lastFailure = 0;
+    this.lastTest = 0;
+    this.notifyStateChange();
+  }
 
   /**
    * Record a failure
