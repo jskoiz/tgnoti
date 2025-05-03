@@ -2,6 +2,7 @@ import { injectable, inject } from 'inversify';
 import { TYPES } from '../types/di.js';
 import { Logger } from '../types/logger.js';
 import { TweetDocument, TopicFilterDocument } from '../types/mongodb.js';
+import { AffiliateDocument } from '../types/affiliates.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 
 /**
@@ -225,6 +226,104 @@ export class MongoDataValidator {
       errors
     };
   }
+  
+  /**
+   * Validates an affiliate document before saving to MongoDB
+   * @param affiliate The affiliate document to validate
+   * @returns An object containing validation result and any error messages
+   */
+  validateAffiliate(affiliate: AffiliateDocument): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    const startTime = Date.now();
+
+    // Check required fields
+    if (!affiliate.userId) {
+      errors.push('Missing required field: userId');
+    }
+    if (!affiliate.userName) {
+      errors.push('Missing required field: userName');
+    }
+    if (!affiliate.affiliates) {
+      errors.push('Missing required field: affiliates');
+    }
+    if (!affiliate.lastChecked) {
+      errors.push('Missing required field: lastChecked');
+    }
+    if (!affiliate.metadata) {
+      errors.push('Missing required field: metadata');
+    }
+
+    // Check metadata
+    if (affiliate.metadata) {
+      if (!affiliate.metadata.source) {
+        errors.push('Missing source in metadata');
+      }
+      if (!affiliate.metadata.capturedAt) {
+        errors.push('Missing capturedAt in metadata');
+      }
+      if (!affiliate.metadata.version) {
+        errors.push('Missing version in metadata');
+      }
+    }
+
+    // Check affiliates array
+    if (affiliate.affiliates && Array.isArray(affiliate.affiliates)) {
+      for (let i = 0; i < affiliate.affiliates.length; i++) {
+        const a = affiliate.affiliates[i];
+        if (!a.userId) {
+          errors.push(`Missing userId in affiliate at index ${i}`);
+        }
+        if (!a.userName) {
+          errors.push(`Missing userName in affiliate at index ${i}`);
+        }
+        if (!a.fullName) {
+          errors.push(`Missing fullName in affiliate at index ${i}`);
+        }
+        if (a.followersCount === undefined) {
+          errors.push(`Missing followersCount in affiliate at index ${i}`);
+        }
+        if (a.followingsCount === undefined) {
+          errors.push(`Missing followingsCount in affiliate at index ${i}`);
+        }
+        if (a.isVerified === undefined) {
+          errors.push(`Missing isVerified in affiliate at index ${i}`);
+        }
+        if (!a.addedAt) {
+          errors.push(`Missing addedAt in affiliate at index ${i}`);
+        }
+        if (a.isActive === undefined) {
+          errors.push(`Missing isActive in affiliate at index ${i}`);
+        }
+      }
+    }
+
+    // Validate data types
+    if (affiliate.userId && typeof affiliate.userId !== 'string') {
+      errors.push('User ID must be a string');
+    }
+    if (affiliate.userName && typeof affiliate.userName !== 'string') {
+      errors.push('User name must be a string');
+    }
+    if (affiliate.affiliates && !Array.isArray(affiliate.affiliates)) {
+      errors.push('Affiliates must be an array');
+    }
+    if (affiliate.lastChecked && !(affiliate.lastChecked instanceof Date)) {
+      errors.push('Last checked must be a Date object');
+    }
+
+    // Record validation metrics
+    this.metrics.timing('mongodb.validation.affiliate_duration', Date.now() - startTime);
+    if (errors.length > 0) {
+      this.metrics.increment('mongodb.validation.affiliate_failures');
+    } else {
+      this.metrics.increment('mongodb.validation.affiliate_successes');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
 
   /**
    * Performs data integrity checks on the MongoDB collections
@@ -288,6 +387,26 @@ export class MongoDataValidator {
       
       if (invalidFilterTypes > 0) {
         issues.push(`Found ${invalidFilterTypes} topic filters with invalid filter types`);
+      }
+      
+      // Check affiliates collection if it exists
+      if (collections.affiliates) {
+        const affiliatesCollection = db.collection(collections.affiliates);
+        
+        // Check for affiliates without required fields
+        const invalidAffiliates = await affiliatesCollection.countDocuments({
+          $or: [
+            { userId: { $exists: false } },
+            { userName: { $exists: false } },
+            { affiliates: { $exists: false } },
+            { lastChecked: { $exists: false } },
+            { 'metadata.source': { $exists: false } }
+          ]
+        });
+        
+        if (invalidAffiliates > 0) {
+          issues.push(`Found ${invalidAffiliates} affiliate documents with missing required fields`);
+        }
       }
       
       // Record integrity check metrics

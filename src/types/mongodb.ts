@@ -1,5 +1,6 @@
 import { Tweet, TweetUser } from './twitter.js';
 import { ObjectId } from 'mongodb';
+import { AffiliateDocument } from './affiliates.js';
 
 export interface TweetDocument extends Tweet {
   _id?: ObjectId;
@@ -42,6 +43,7 @@ export interface MongoConfig {
   collections: {
     tweets: string;
     topicFilters: string;
+    affiliates: string;
   };
 }
 
@@ -56,5 +58,10 @@ export interface MongoIndexConfig {
   topicFilters: {
     'topicId': { unique: false };
     'topicId_filterType_value': { unique: true };
+  };
+  affiliates: {
+    'userId': { unique: true };
+    'userName': { unique: false };
+    'lastChecked': { unique: false };
   };
 }

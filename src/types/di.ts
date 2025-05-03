@@ -28,6 +28,8 @@ const TYPES = {
   RettiwtSearchBuilder: Symbol.for('RettiwtSearchBuilder'),
   SearchCacheManager: Symbol.for('SearchCacheManager'),
   SearchStrategy: Symbol.for('SearchStrategy'),
+  TwitterAffiliateService: Symbol.for('TwitterAffiliateService'),
+  AffiliateTrackingService: Symbol.for('AffiliateTrackingService'),
 
   // Telegram services
   TelegramBot: Symbol.for('TelegramBot'),

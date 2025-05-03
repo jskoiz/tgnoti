@@ -64,6 +64,8 @@ export class Storage {
           viewCount: 0,
           createdAt: new Date().toISOString(),
           tweetBy: {
+            id: 'system',
+            userId: 'system',
             userName: 'system',
             displayName: 'System',
             fullName: 'System',

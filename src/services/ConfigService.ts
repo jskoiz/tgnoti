@@ -1,5 +1,6 @@
 import { injectable, inject } from 'inversify';
 import { UnifiedConfig, loadConfig, TopicConfig } from '../config/unified.js';
+import { AFFILIATE_TRACKING_CONFIG } from '../config/topicConfig.js';
 import { TYPES } from '../types/di.js';
 import { Logger } from '../types/logger.js';
 import { StorageService } from './StorageService.js';
@@ -65,6 +66,14 @@ export class ConfigService {
   
   getSystemConfig() {
     return this.config.system;
+  }
+  
+  /**
+   * Get the affiliate tracking configuration
+   * @returns The affiliate tracking configuration
+   */
+  getAffiliateTrackingConfig() {
+    return AFFILIATE_TRACKING_CONFIG;
   }
   
   // For backward compatibility

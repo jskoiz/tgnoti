@@ -53,6 +53,7 @@ export interface MongoDBConfig {
   collections: {
     tweets: string;
     topicFilters: string;
+    affiliates: string;
   };
 }
 
@@ -161,7 +162,8 @@ export function loadConfig(): UnifiedConfig {
       dbName: 'twitter_notifications',
       collections: {
         tweets: 'tweets',
-        topicFilters: 'topic_filters'
+        topicFilters: 'topic_filters',
+        affiliates: 'affiliates'
       }
     },
     system: {
