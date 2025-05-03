@@ -18,8 +18,21 @@ if (fs.existsSync(toolsEnvPath)) {
 }
 
 // Telegram credentials
-const TELEGRAM_BOT_TOKEN = process.env.STAGING_TELEGRAM_BOT_TOKEN || '7590784859:AAEzgfFmMdhJESWEAr2dNjee_dahxFY-u9c';
-const TELEGRAM_GROUP_ID = process.env.TELEGRAM_GROUP_ID || '-1002379334714';
+const TELEGRAM_BOT_TOKEN = process.env.STAGING_TELEGRAM_BOT_TOKEN as string;
+const TELEGRAM_GROUP_ID = process.env.TELEGRAM_GROUP_ID as string;
+
+// Validate required environment variables
+if (!TELEGRAM_BOT_TOKEN) {
+  console.error(chalk.red('Error: STAGING_TELEGRAM_BOT_TOKEN environment variable is required'));
+  console.error(chalk.yellow('Please add it to your .env file or tools/.env file'));
+  process.exit(1);
+}
+
+if (!TELEGRAM_GROUP_ID) {
+  console.error(chalk.red('Error: TELEGRAM_GROUP_ID environment variable is required'));
+  console.error(chalk.yellow('Please add it to your .env file or tools/.env file'));
+  process.exit(1);
+}
 
 // Competitor data with type definition
 interface Competitor {
