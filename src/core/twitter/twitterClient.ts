@@ -260,7 +260,17 @@ export class TwitterClient {
               (searchError.message.includes('404') ||
                (searchError as any)?.response?.status === 404)) {
             
-            this.logger.warn('Search endpoint returned 404, trying alternative approach');
+            // Enhanced diagnostic logging for 404 errors
+            const errorContext = this.createLogContext({
+              url: (searchError as any)?.config?.url || 'unknown',
+              method: (searchError as any)?.config?.method || 'unknown',
+              searchType: searchConfig.fromUsers && searchConfig.fromUsers.length > 0 ? 'fromUsers' :
+                         searchConfig.mentions && searchConfig.mentions.length > 0 ? 'mentions' : 'keywords',
+              userCount: (searchConfig.fromUsers?.length || 0) + (searchConfig.mentions?.length || 0),
+              requestData: JSON.stringify((searchError as any)?.config?.data || {}).substring(0, 200)
+            });
+            
+            this.logger.warn('Search endpoint returned 404, trying alternative approach', searchError, errorContext);
             
             // If we're searching for tweets FROM users, try to get user timeline instead
             if (searchConfig.fromUsers && searchConfig.fromUsers.length > 0) {
@@ -315,8 +325,23 @@ export class TwitterClient {
           throw searchError;
         }
       } catch (searchError) {
-        // Specific error handling for the search call
-        this.logger.error(`Search API call failed: ${searchError instanceof Error ? searchError.message : String(searchError)}`);
+        // Enhanced error logging for search call failures
+        const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
+        const errorObj = searchError instanceof Error ? searchError : new Error(errorMessage);
+        
+        const errorContext = this.createLogContext({
+          status: (searchError as any)?.response?.status,
+          url: (searchError as any)?.config?.url,
+          method: (searchError as any)?.config?.method,
+          searchParams: {
+            fromUsers: searchConfig.fromUsers?.length || 0,
+            mentions: searchConfig.mentions?.length || 0,
+            startTime: searchConfig.startTime,
+            endTime: searchConfig.endTime
+          }
+        });
+        
+        this.logger.error(`Search API call failed: ${errorMessage}`, errorObj, errorContext);
         throw searchError;
       }
     } catch (error) {
@@ -452,25 +477,65 @@ export class TwitterClient {
 
       this.logger.info(`Fetching affiliates for user ID: ${userId}, count: ${count}`);
       
-      const data = await this.client.user.affiliates(userId, count, cursor);
-      
-      if (!data || !(data as any).list) {
-        this.logger.warn(`No affiliates found for user ${userId}`);
-        return [];
+      try {
+        const data = await this.client.user.affiliates(userId, count, cursor);
+        
+        if (!data || !(data as any).list) {
+          this.logger.warn(`No affiliates found for user ${userId}`);
+          return [];
+        }
+        
+        // Map to our Affiliate type
+        const affiliatesList = (data as any).list.map((user: any) => ({
+          userId: user.id,
+          userName: user.userName.toLowerCase(),
+          fullName: user.fullName,
+          followersCount: user.followersCount,
+          followingsCount: user.followingsCount,
+          isVerified: user.isVerified
+        }));
+        
+        this.logger.info(`Found ${affiliatesList.length} affiliates for user ${userId}`);
+        return affiliatesList;
+      } catch (affiliateError) {
+        // Check if it's a 404 error
+        if (affiliateError instanceof Error &&
+            (affiliateError.message.includes('404') ||
+             (affiliateError as any)?.response?.status === 404)) {
+          
+          this.logger.warn(`Affiliates endpoint returned 404 for user ${userId}, falling back to following list`);
+          
+          // Fallback to getting user's following list instead
+          try {
+            // Get user's following list as a fallback
+            const followingData = await this.client.user.following(userId, count);
+            
+            if (!followingData || !(followingData as any).list) {
+              this.logger.warn(`No following data found for user ${userId}`);
+              return [];
+            }
+            
+            // Map to our Affiliate type
+            const followingList = (followingData as any).list.map((user: any) => ({
+              userId: user.id,
+              userName: user.userName.toLowerCase(),
+              fullName: user.fullName,
+              followersCount: user.followersCount || 0,
+              followingsCount: user.followingsCount || 0,
+              isVerified: user.isVerified || false
+            }));
+            
+            this.logger.info(`Fallback method found ${followingList.length} affiliates (following) for user ${userId}`);
+            return followingList;
+          } catch (followingError) {
+            this.logger.error(`Error getting following list for ${userId}:`, followingError instanceof Error ? followingError : new Error(String(followingError)));
+            throw affiliateError; // Rethrow the original error
+          }
+        }
+        
+        // For other errors, just rethrow
+        throw affiliateError;
       }
-      
-      // Map to our Affiliate type
-      const affiliates = (data as any).list.map((user: any) => ({
-        userId: user.id,
-        userName: user.userName.toLowerCase(),
-        fullName: user.fullName,
-        followersCount: user.followersCount,
-        followingsCount: user.followingsCount,
-        isVerified: user.isVerified
-      }));
-      
-      this.logger.info(`Found ${affiliates.length} affiliates for user ${userId}`);
-      return affiliates;
     } catch (error) {
       this.logger.debug('TwitterClient: Error in getUserAffiliates before handling', {
         errorType: error instanceof Error ? error.constructor.name : typeof error,

@@ -16,7 +16,9 @@
     "test": "jest",
     "dashboard": "NODE_NO_WARNINGS=1 tsx tools/show-dashboard.ts",
     "log-viewer": "NODE_NO_WARNINGS=1 SHOW_DASHBOARD=true nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
-    "tweet-analysis": "NODE_NO_WARNINGS=1 tsx tools/run-tweet-analysis.ts"
+    "tweet-analysis": "NODE_NO_WARNINGS=1 tsx tools/run-tweet-analysis.ts",
+    "build-dashboard": "NODE_NO_WARNINGS=1 tsx tools/build-dashboard-client.ts",
+    "web": "(pkill -f 'tsx tools/start-dashboard.ts' || true) && (lsof -ti tcp:3000 | xargs kill -9 || true) && (pkill -f \"node --loader ts-node/esm\" || true) && (pkill -f nodemon || true) && rm -f telegram-bot.lock && npm run build-dashboard && NODE_NO_WARNINGS=1 tsx tools/start-dashboard.ts"
   },
   "keywords": [
     "twitter",
@@ -27,18 +29,30 @@
   "author": "",
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
+    "@types/express": "^5.0.1",
     "@types/node-telegram-bot-api": "^0.64.7",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.3",
+    "@types/socket.io-client": "^3.0.0",
     "axios": "^1.8.2",
     "canvas": "^3.1.0",
     "chalk": "^5.4.1",
     "chart.js": "^3.9.1",
     "chartjs-node-canvas": "^4.1.6",
     "dotenv": "^16.4.7",
+    "express": "^5.1.0",
     "inversify": "^6.2.2",
     "mongodb": "^6.13.1",
     "node-telegram-bot-api": "^0.64.0",
+    "react": "^19.1.0",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "^19.1.0",
+    "react-hook-form": "^7.56.1",
+    "react-router-dom": "^7.5.3",
     "reflect-metadata": "^0.2.2",
-    "rettiwt-api": "https://github.com/Rishikant181/Rettiwt-API.git#dev"
+    "rettiwt-api": "https://github.com/Rishikant181/Rettiwt-API.git#dev",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.25",

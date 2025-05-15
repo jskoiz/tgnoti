@@ -74,31 +74,40 @@ export class StorageService {
   
   async markSeen(tweetId: string, topicId: string): Promise<void> {
     try {
+      this.logger.info(`Marking tweet ${tweetId} as seen for topic ${topicId}`);
+      
       // For backward compatibility, we'll check if the tweet exists
-      if (!(await this.hasSeen(tweetId, topicId))) {
-        await this.storeTweet({
-          id: tweetId,
-          text: '[Marked as seen]',
-          replyCount: 0,
-          retweetCount: 0,
-          likeCount: 0,
-          viewCount: 0,
-          createdAt: new Date().toISOString(),
-          tweetBy: {
-            id: 'system',
-            userId: 'system',
-            userName: 'system',
-            displayName: 'System',
-            fullName: 'System',
-            followersCount: 0,
-            followingCount: 0,
-            statusesCount: 0,
-            verified: false,
-            isVerified: false,
-            createdAt: new Date().toISOString()
-          }
-        }, topicId);
+      const alreadySeen = await this.hasSeen(tweetId, topicId);
+      if (alreadySeen) {
+        this.logger.info(`Tweet ${tweetId} already marked as seen for topic ${topicId}`);
+        return;
       }
+      
+      this.logger.info(`Tweet ${tweetId} not seen yet, creating placeholder record for topic ${topicId}`);
+      await this.storeTweet({
+        id: tweetId,
+        text: '[Marked as seen]',
+        replyCount: 0,
+        retweetCount: 0,
+        likeCount: 0,
+        viewCount: 0,
+        createdAt: new Date().toISOString(),
+        tweetBy: {
+          id: 'system',
+          userId: 'system',
+          userName: 'system',
+          displayName: 'System',
+          fullName: 'System',
+          followersCount: 0,
+          followingCount: 0,
+          statusesCount: 0,
+          verified: false,
+          isVerified: false,
+          createdAt: new Date().toISOString()
+        }
+      }, topicId);
+      
+      this.logger.info(`Successfully marked tweet ${tweetId} as seen for topic ${topicId}`);
     } catch (error) {
       this.logger.error('Failed to mark tweet as seen:', error instanceof Error ? error : new Error(String(error)));
       throw error;

@@ -280,7 +280,16 @@ export class MongoDBService {
         query['metadata.topicId'] = topicId;
       }
       
+      this.logger.debug(`Checking if tweet ${tweetId} has been seen`, {
+        topicId: topicId || 'any',
+        query: JSON.stringify(query)
+      });
+      
       const count = await collection.countDocuments(query, { limit: 1 });
+      this.logger.debug(`Tweet ${tweetId} seen check result: ${count > 0 ? 'SEEN' : 'NOT SEEN'}`, {
+        topicId: topicId || 'any'
+      });
+      
       return count > 0;
     } catch (error) {
       this.logger.error(`Failed to check if tweet ${tweetId} has been seen:`, error instanceof Error ? error : new Error(String(error)));
