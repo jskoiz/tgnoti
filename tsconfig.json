@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext", 
+    "moduleResolution": "NodeNext",
     "outDir": "./build",
     "strict": true,
     "esModuleInterop": true,
@@ -13,10 +13,12 @@
     "declaration": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "allowJs": true
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"]
   },
   "include": ["src/**/*", "tools/**/*"],
-  "exclude": ["node_modules", "dist", "build", "src/tests/**/*"],
+  "exclude": ["node_modules", "dist", "build", "src/tests/**/*", "src/dashboard/client/__tests__/**/*", "**/*.test.ts", "**/*.test.tsx"],
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"

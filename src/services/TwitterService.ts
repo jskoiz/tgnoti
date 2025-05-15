@@ -152,51 +152,73 @@ export class TwitterService {
         }
       };
 
-      const searchResponse = await this.client.searchTweets(searchParams);
-      const tweets = searchResponse.data;
-      
-      // Filter to ensure we only get tweets FROM the specified users
-      const targetUsernames = accounts.map(account => account.toLowerCase().replace('@', ''));
-      
-      // Log all tweets before filtering for debugging
-      if (tweets.length > 0) {
-        this.logger.debug(`Pre-filter tweets (${tweets.length}):`);
-        tweets.forEach((tweet, idx) => {
+      try {
+        const searchResponse = await this.client.searchTweets(searchParams);
+        const tweets = searchResponse.data;
+        
+        // Filter to ensure we only get tweets FROM the specified users
+        const targetUsernames = accounts.map(account => account.toLowerCase().replace('@', ''));
+        
+        // Log all tweets before filtering for debugging
+        if (tweets.length > 0) {
+          this.logger.debug(`Pre-filter tweets (${tweets.length}):`);
+          tweets.forEach((tweet, idx) => {
+            const tweetUsername = tweet.tweetBy.userName.toLowerCase().replace('@', '');
+            const isMatch = targetUsernames.includes(tweetUsername);
+            this.logger.debug(`Tweet ${idx+1}: ID=${tweet.id}, by @${tweet.tweetBy.userName}, match=${isMatch}`);
+          });
+        }
+        
+        // Filter tweets to only include those from the specified users
+        const filteredTweets = tweets.filter(tweet => {
           const tweetUsername = tweet.tweetBy.userName.toLowerCase().replace('@', '');
-          const isMatch = targetUsernames.includes(tweetUsername);
-          this.logger.debug(`Tweet ${idx+1}: ID=${tweet.id}, by @${tweet.tweetBy.userName}, match=${isMatch}`);
+          return targetUsernames.includes(tweetUsername);
         });
+        
+        if (filteredTweets.length !== tweets.length) {
+          this.logger.warn(`Filtered out ${tweets.length - filteredTweets.length} tweets that were not authored by the specified accounts`);
+        }
+
+        // Sort tweets by creation date (newest first)
+        filteredTweets.sort((a: Tweet, b: Tweet) => {
+          const dateA = new Date(a.createdAt).getTime();
+          const dateB = new Date(b.createdAt).getTime();
+          return dateB - dateA;
+        });
+
+        const searchDuration = Date.now() - startTime;
+        this.logger.info(`[BATCH SEARCH RESULT] Found ${filteredTweets.length} tweets from ${accounts.length} accounts in ${searchDuration}ms`);
+        
+        this.metrics.timing('twitter.batch_search_duration', searchDuration);
+        this.metrics.gauge('twitter.batch_tweets_found', filteredTweets.length);
+
+        return filteredTweets;
+      } catch (batchError) {
+        // If the batch search fails with a 404, log it but don't throw
+        // The EnhancedTweetMonitor will handle the fallback to individual searches
+        if (batchError instanceof Error && 
+            (batchError.message.includes('404') || 
+             (batchError as any)?.response?.status === 404)) {
+          
+          this.logger.warn(`Batch search returned 404 error, caller should fall back to individual searches`);
+          this.logger.debug(`Batch details:`, {
+            batchSize: accounts.length,
+            sampleAccounts: accounts.slice(0, 3).join(', ')
+          });
+          
+          // Rethrow with enhanced message to signal the need for fallback
+          const enhancedError = new Error(`Batch search endpoint returned 404: ${batchError.message}`);
+          throw enhancedError;
+        }
+        
+        // For other errors, just rethrow
+        throw batchError;
       }
-      
-      // Filter tweets to only include those from the specified users
-      const filteredTweets = tweets.filter(tweet => {
-        const tweetUsername = tweet.tweetBy.userName.toLowerCase().replace('@', '');
-        return targetUsernames.includes(tweetUsername);
-      });
-      
-      if (filteredTweets.length !== tweets.length) {
-        this.logger.warn(`Filtered out ${tweets.length - filteredTweets.length} tweets that were not authored by the specified accounts`);
-      }
-
-      // Sort tweets by creation date (newest first)
-      filteredTweets.sort((a: Tweet, b: Tweet) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
-
-      const duration = Date.now() - startTime;
-      this.logger.info(`[BATCH SEARCH RESULT] Found ${filteredTweets.length} tweets from ${accounts.length} accounts in ${duration}ms`);
-      
-      this.metrics.timing('twitter.batch_search_duration', duration);
-      this.metrics.gauge('twitter.batch_tweets_found', filteredTweets.length);
-
-      return filteredTweets;
     } catch (error) {
-      const duration = Date.now() - startTime;
+      const errorDuration = Date.now() - startTime;
       this.logger.error(`Error searching tweets from multiple accounts:`, error instanceof Error ? error : new Error(String(error)));
       this.metrics.increment('twitter.batch_search_errors');
-      this.metrics.timing('twitter.batch_error_duration', duration);
+      this.metrics.timing('twitter.batch_error_duration', errorDuration);
       throw error;
     }
   }
@@ -226,28 +248,50 @@ export class TwitterService {
         replies: true
       };
 
-      const searchResponse = await this.client.searchTweets(searchParams);
-      const tweets = searchResponse.data;
+      try {
+        const searchResponse = await this.client.searchTweets(searchParams);
+        const tweets = searchResponse.data;
 
-      // Sort tweets by creation date (newest first)
-      tweets.sort((a: Tweet, b: Tweet) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
+        // Sort tweets by creation date (newest first)
+        tweets.sort((a: Tweet, b: Tweet) => {
+          const dateA = new Date(a.createdAt).getTime();
+          const dateB = new Date(b.createdAt).getTime();
+          return dateB - dateA;
+        });
 
-      const duration = Date.now() - startTime;
-      this.logger.info(`[BATCH SEARCH RESULT] Found ${tweets.length} tweets mentioning ${accounts.length} accounts in ${duration}ms`);
-      
-      this.metrics.timing('twitter.batch_mention_duration', duration);
-      this.metrics.gauge('twitter.batch_mention_found', tweets.length);
+        const searchDuration = Date.now() - startTime;
+        this.logger.info(`[BATCH SEARCH RESULT] Found ${tweets.length} tweets mentioning ${accounts.length} accounts in ${searchDuration}ms`);
+        
+        this.metrics.timing('twitter.batch_mention_duration', searchDuration);
+        this.metrics.gauge('twitter.batch_mention_found', tweets.length);
 
-      return tweets;
+        return tweets;
+      } catch (batchError) {
+        // If the batch search fails with a 404, log it but don't throw
+        // The EnhancedTweetMonitor will handle the fallback to individual searches
+        if (batchError instanceof Error && 
+            (batchError.message.includes('404') || 
+             (batchError as any)?.response?.status === 404)) {
+          
+          this.logger.warn(`Mentions batch search returned 404 error, caller should fall back to individual searches`);
+          this.logger.debug(`Batch details:`, {
+            batchSize: accounts.length,
+            sampleAccounts: accounts.slice(0, 3).join(', ')
+          });
+          
+          // Rethrow with enhanced message to signal the need for fallback
+          const enhancedError = new Error(`Mentions batch search endpoint returned 404: ${batchError.message}`);
+          throw enhancedError;
+        }
+        
+        // For other errors, just rethrow
+        throw batchError;
+      }
     } catch (error) {
-      const duration = Date.now() - startTime;
+      const errorDuration = Date.now() - startTime;
       this.logger.error(`Error searching tweets mentioning multiple accounts:`, error instanceof Error ? error : new Error(String(error)));
       this.metrics.increment('twitter.batch_mention_errors');
-      this.metrics.timing('twitter.batch_mention_error_duration', duration);
+      this.metrics.timing('twitter.batch_mention_error_duration', errorDuration);
       throw error;
     }
   }

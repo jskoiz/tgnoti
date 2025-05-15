@@ -34,9 +34,15 @@ export class TelegramService {
   
   async sendMessage(message: string | FormattedMessage, topicId: number): Promise<void> {
     // If message is a string, convert it to a FormattedMessage object
-    const formattedMessage = typeof message === 'string' 
-      ? { text: message } 
+    const formattedMessage = typeof message === 'string'
+      ? { text: message }
       : message;
+    
+    this.logger.info(`Attempting to queue message for topic ${topicId}`, {
+      messageType: typeof message,
+      hasText: typeof message === 'object' && !!message.text,
+      hasPhoto: typeof message === 'object' && !!message.photo
+    });
     
     this.messageQueue.push({ message: formattedMessage, topicId });
     this.metrics.increment('telegram.messages.queued');

@@ -78,9 +78,17 @@ export class TweetProcessor {
       const formattedMessage = this.formatTweet(tweet);
       
       // 6. Send to Telegram
-      await this.telegram.sendMessage(formattedMessage, topic.id);
+      this.logger.info(`Sending tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id})`);
+      try {
+        await this.telegram.sendMessage(formattedMessage, topic.id);
+        this.logger.info(`Successfully sent tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id})`);
+      } catch (sendError) {
+        this.logger.error(`Failed to send tweet ${tweetId} to Telegram:`, sendError instanceof Error ? sendError : new Error(String(sendError)));
+        throw sendError;
+      }
       
       // 7. Mark as processed
+      this.logger.info(`Marking tweet ${tweetId} as processed for topic ${topicId}`);
       await this.storage.storeTweet(tweet, topicId);
       
       const processingTime = Date.now() - startTime;

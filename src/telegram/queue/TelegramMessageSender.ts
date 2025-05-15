@@ -65,8 +65,17 @@ export class TelegramMessageSender implements ITelegramMessageSender {
 
       }
       
+      this.logger.info(`Attempting to send message to Telegram chat ${chatId} with thread ID ${options?.message_thread_id || 'none'}`, {
+        textLength: text.length,
+        hasOptions: !!options,
+        hasTweetMetadata: !!metadata
+      });
+      
       const message = await this.bot.sendMessage(chatId.toString(), text, options);
-      this.logger.debug(`Message successfully sent to chat ${chatId}, message ID: ${message.message_id}`);
+      this.logger.info(`Message successfully sent to chat ${chatId}, message ID: ${message.message_id}`, {
+        threadId: options?.message_thread_id,
+        tweetId: metadata?.tweet?.id || 'unknown'
+      });
       
       // Reset rate limit state on successful send
       if (this.rateLimitRetryAfter > 0) {

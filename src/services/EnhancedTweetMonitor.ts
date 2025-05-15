@@ -483,18 +483,63 @@ export class EnhancedTweetMonitor {
       // Use circuit breaker for Twitter API calls
       const twitterCB = this.circuitBreakers.get('twitter_api')!;
       
-      // OPTIMIZED: Use a single search for all accounts in the batch
-      const tweets = await twitterCB.execute(
-        async () => {
-          // Create a combined search for all accounts
-          if (searchType === 'from') {
-            return this.twitter.searchTweetsFromUsers(accounts, searchStartTime);
-          } else {
-            return this.twitter.searchTweetsMentioningUsers(accounts, searchStartTime);
+      let tweets: any[] = [];
+      
+      try {
+        // OPTIMIZED: Use a single search for all accounts in the batch
+        tweets = await twitterCB.execute(
+          async () => {
+            // Create a combined search for all accounts
+            if (searchType === 'from') {
+              return this.twitter.searchTweetsFromUsers(accounts, searchStartTime);
+            } else {
+              return this.twitter.searchTweetsMentioningUsers(accounts, searchStartTime);
+            }
+          },
+          `search:${topic.name}:batch`
+        );
+      } catch (searchError) {
+        // If batch search fails with 404, fall back to individual account searches
+        if (searchError instanceof Error &&
+            (searchError.message.includes('404') ||
+             (searchError as any)?.response?.status === 404)) {
+          
+          this.logger.warn(`[FALLBACK] Batch search failed with 404 for topic ${topic.name}, trying individual account searches`);
+          
+          // Process each account individually
+          for (const account of accounts) {
+            try {
+              this.logger.info(`[FALLBACK] Searching tweets for individual account: ${account}`);
+              
+              // Use the appropriate search method based on search type
+              const accountTweets = await twitterCB.execute(
+                async () => {
+                  if (searchType === 'from') {
+                    return this.twitter.searchTweets(account, searchStartTime, 'from');
+                  } else {
+                    return this.twitter.searchTweets(account, searchStartTime, 'mention');
+                  }
+                },
+                `search:${topic.name}:individual`
+              );
+              
+              tweets.push(...accountTweets);
+              this.logger.info(`[FALLBACK] Found ${accountTweets.length} tweets for account ${account}`);
+              
+              // Add a small delay between individual searches to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (accountError) {
+              this.logger.error(`[FALLBACK] Error searching tweets for account ${account}:`,
+                accountError instanceof Error ? accountError : new Error(String(accountError)));
+            }
           }
-        },
-        `search:${topic.name}:batch`
-      );
+          
+          this.logger.info(`[FALLBACK] Individual searches found a total of ${tweets.length} tweets for ${accounts.length} accounts`);
+        } else {
+          // For other errors, rethrow
+          throw searchError;
+        }
+      }
       
       this.logger.info(`Found ${tweets.length} tweets for batch of ${accounts.length} accounts`);
       totalTweetsFound += tweets.length;

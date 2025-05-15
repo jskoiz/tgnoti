@@ -186,8 +186,18 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
         // Only mark as seen if both tweetId and threadId are present
         if (message.tweetId && message.threadId) {
           this.logger.info(`Message successfully sent to chat thread ID ${message.threadId}`, {
+            tweetId: message.tweetId,
+            messageId: message.id,
+            chatId: message.chatId
           });
-          await this.storage.markSeen(message.tweetId, message.threadId.toString());
+          try {
+            await this.storage.markSeen(message.tweetId, message.threadId.toString());
+            this.logger.info(`Tweet ${message.tweetId} marked as seen for topic ${message.threadId}`);
+          } catch (markError) {
+            this.logger.error(`Failed to mark tweet ${message.tweetId} as seen:`, markError instanceof Error ? markError : new Error(String(markError)));
+          }
+        } else {
+          this.logger.warn(`Cannot mark tweet as seen - missing data: tweetId=${message.tweetId}, threadId=${message.threadId}`);
         }
         this.logger.debug(`Message ${message.id} sent successfully`);
         
