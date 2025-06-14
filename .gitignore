@@ -8,6 +8,9 @@ package-lock.json
 coverage/
 list.csv
 
+# Documentation (sensitive)
+docs/
+
 # Production
 build/
 dist/
