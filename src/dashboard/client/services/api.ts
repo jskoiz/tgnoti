@@ -64,21 +64,16 @@ export const api = {
    */
   getMetrics: async (): Promise<MetricsData> => {
     try {
-      console.log('Fetching metrics from /api/metrics');
       const response = await fetch('/api/metrics');
-      console.log('Metrics response status:', response.status);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Failed to fetch metrics:', response.statusText, errorText);
         throw new Error(`Failed to fetch metrics: ${response.statusText} - ${errorText}`);
       }
-      
+
       const data = await response.json();
-      console.log('Metrics data received:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching metrics:', error);
       throw error;
     }
   },
@@ -88,21 +83,16 @@ export const api = {
    */
   getTopicMetrics: async (): Promise<TopicMetricsData> => {
     try {
-      console.log('Fetching topic metrics from /api/metrics/topics');
       const response = await fetch('/api/metrics/topics');
-      console.log('Topic metrics response status:', response.status);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Failed to fetch topic metrics:', response.statusText, errorText);
         throw new Error(`Failed to fetch topic metrics: ${response.statusText} - ${errorText}`);
       }
-      
+
       const data = await response.json();
-      console.log('Topic metrics data received:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching topic metrics:', error);
       throw error;
     }
   },

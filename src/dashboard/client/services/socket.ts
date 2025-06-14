@@ -21,11 +21,11 @@ export class SocketService {
 
     // Set up event listeners
     this.socket.on('connect', () => {
-      console.log('Connected to WebSocket server');
+      // Connected to WebSocket server
     });
 
     this.socket.on('disconnect', () => {
-      console.log('Disconnected from WebSocket server');
+      // Disconnected from WebSocket server
     });
 
     // Set up data event listeners

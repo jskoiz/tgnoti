@@ -150,13 +150,6 @@ function getEnvVar(name: keyof typeof ENV, required = false): string | undefined
  */
 function getEnvBool(name: keyof typeof ENV, defaultValue: boolean): boolean {
   const value = getEnvVar(name);
-    console.log('Loading boolean env var', {
-      name,
-      envKey: ENV[name],
-      value,
-      defaultValue,
-      result: value === undefined ? defaultValue : value.toLowerCase() === 'true'
-    });
   if (value === undefined) return defaultValue;
   return value.toLowerCase() === 'true';
 }
@@ -334,7 +327,7 @@ export class Environment {
         parse_mode: 'HTML',
         disable_web_page_preview: true
       },
-      topicIds: { // TODO: Move to topics.ts
+      topicIds: { // Legacy topic IDs - consider moving to topics.ts in future refactor
         TROJAN: 381,
         COMPETITOR: 377,
         KOL: 379

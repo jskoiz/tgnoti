@@ -276,17 +276,34 @@ export class TwitterClient {
             if (searchConfig.fromUsers && searchConfig.fromUsers.length > 0) {
               const tweets: Tweet[] = [];
               
-              // For each user, try to get their timeline
-              for (const username of searchConfig.fromUsers) {
+              // For each user, try to get their timeline with proper rate limiting
+              for (let i = 0; i < searchConfig.fromUsers.length; i++) {
+                const username = searchConfig.fromUsers[i];
+                
                 try {
                   this.logger.info(`Trying to get timeline for user: ${username}`);
+                  
+                  // Add rate limiting delay between timeline requests (3 seconds)
+                  if (i > 0) {
+                    this.logger.debug(`Adding 3s delay before timeline request for ${username}`);
+                    await this.delay(3000);
+                  }
                   
                   // Get user details first to get the ID
                   const user = await this.client.user.details(username);
                   if (!user) {
-                    this.logger.warn(`User ${username} not found`);
+                    // Enhanced logging for user not found - could be suspended
+                    this.logger.warn(`[USER STATUS] User ${username} not found - may be suspended, deleted, or username changed. Will continue monitoring for when they return.`);
+                    this.metrics.increment(`twitter.user_not_found.${username}`);
                     continue;
                   }
+                  
+                  // Log successful user resolution for previously missing users
+                  this.logger.info(`[USER STATUS] User ${username} found and accessible - ID: ${user.id}`);
+                  this.metrics.increment(`twitter.user_found.${username}`);
+                  
+                  // Add small delay before timeline request
+                  await this.delay(1000);
                   
                   // Get user timeline
                   const timeline = await this.client.user.timeline(user.id);
@@ -306,7 +323,24 @@ export class TwitterClient {
                     tweets.push(...mappedTweets);
                   }
                 } catch (timelineError) {
-                  this.logger.error(`Error getting timeline for ${username}:`, timelineError instanceof Error ? timelineError : new Error(String(timelineError)));
+                  const isRateLimit = timelineError instanceof Error &&
+                    (timelineError.message.includes('429') || timelineError.message.includes('TOO_MANY_REQUESTS'));
+                  
+                  const isSuspended = timelineError instanceof Error &&
+                    (timelineError.message.includes('suspended') || timelineError.message.includes('User not found'));
+                  
+                  if (isRateLimit) {
+                    this.logger.warn(`[RATE LIMIT] Rate limit hit for ${username}, adding longer delay`);
+                    // Add exponential backoff for rate limit errors
+                    const backoffDelay = Math.min(30000, 5000 * Math.pow(2, i)); // Max 30 seconds
+                    this.logger.info(`Waiting ${backoffDelay}ms before continuing due to rate limit`);
+                    await this.delay(backoffDelay);
+                  } else if (isSuspended) {
+                    this.logger.warn(`[USER STATUS] User ${username} appears to be suspended or deleted. Will continue monitoring for when they return.`);
+                    this.metrics.increment(`twitter.user_suspended.${username}`);
+                  } else {
+                    this.logger.error(`Error getting timeline for ${username}:`, timelineError instanceof Error ? timelineError : new Error(String(timelineError)));
+                  }
                 }
               }
               
@@ -445,7 +479,8 @@ export class TwitterClient {
   }
 
   private isValidApiKey(key: string): boolean {
-    const isValid = typeof key === 'string' && key.length >= 32 && key.includes('auth_token=') && key.includes('twid=');
+    // More flexible validation - the key format may have changed
+    const isValid = typeof key === 'string' && key.length >= 32;
     
     // Add detailed logging for key validation
     this.logger.debug('API key validation result', {
@@ -453,6 +488,7 @@ export class TwitterClient {
       hasMinLength: key?.length >= 32,
       hasAuthToken: key?.includes('auth_token='),
       hasTwid: key?.includes('twid='),
+      hasBase64Content: key?.includes('='), // Check for base64-like content
       isValid
     });
     

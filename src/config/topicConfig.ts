@@ -106,9 +106,18 @@ export const TOPIC_CONFIG: Record<string, TopicDetails> = {
       {
         type: 'user',
         value: 'notthreadguy'
+      },
+      {
+        type: 'user',
+        value: 'alexjmingolla'
       }
     ]
   },
+  MASS_TRACKING: {
+    id: 33763,
+    notification: { enabled: true },
+    filters: [] // Will be populated dynamically from CSV
+  }
 };
 
 /**
@@ -155,6 +164,9 @@ export const telegramConfig = {
     },
     AFFILIATE_MONITORING: {
       id: 6545
+    },
+    MASS_TRACKING: {
+      id: 33763
     }
   }
 };

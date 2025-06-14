@@ -30,6 +30,9 @@ const TYPES = {
   SearchStrategy: Symbol.for('SearchStrategy'),
   TwitterAffiliateService: Symbol.for('TwitterAffiliateService'),
   AffiliateTrackingService: Symbol.for('AffiliateTrackingService'),
+  CsvAccountLoader: Symbol.for('CsvAccountLoader'),
+  DiscordWebhookService: Symbol.for('DiscordWebhookService'),
+  DeliveryManager: Symbol.for('DeliveryManager'),
 
   // Telegram services
   TelegramBot: Symbol.for('TelegramBot'),

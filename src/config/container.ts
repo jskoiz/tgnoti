@@ -42,6 +42,9 @@ import { TweetProcessor } from '../services/TweetProcessor.js';
 import { TelegramService } from '../services/TelegramService.js';
 import { UsernameHandler } from '../utils/usernameHandler.js';
 import { EnhancedTweetMonitor } from '../services/EnhancedTweetMonitor.js';
+import { CsvAccountLoader } from '../services/CsvAccountLoader.js';
+import { DiscordWebhookService, DiscordWebhookConfig } from '../services/DiscordWebhookService.js';
+import { DeliveryManager } from '../services/DeliveryManager.js';
 
 import TelegramBotApi from 'node-telegram-bot-api';
 import { TelegramQueueConfig } from '../types/telegram.js';
@@ -73,7 +76,6 @@ export function createContainer(): Container {
   
   // Configure LoggerFactory with LoggingConfig
   container.bind<LoggerFactory>(TYPES.LoggerFactory).toDynamicValue((context) => {
-    console.log('Creating LoggerFactory instance with config');
     const loggingConfig = context.container.get<LoggingConfig>(TYPES.LoggingConfig);
     const factory = LoggerFactory.getInstance();
     factory.configure(loggingConfig.getFullConfig());
@@ -155,6 +157,27 @@ export function createContainer(): Container {
   container.bind<RettiwtKeyManager>(TYPES.RettiwtKeyManager).to(RettiwtKeyManager).inSingletonScope();
   container.bind<TwitterAffiliateService>(TYPES.TwitterAffiliateService).to(TwitterAffiliateService).inSingletonScope();
   container.bind<AffiliateTrackingService>(TYPES.AffiliateTrackingService).to(AffiliateTrackingService).inSingletonScope();
+  container.bind<CsvAccountLoader>(TYPES.CsvAccountLoader).to(CsvAccountLoader).inSingletonScope();
+
+  // Discord Webhook Configuration
+  container.bind<DiscordWebhookConfig>('DiscordWebhookConfig').toDynamicValue(() => ({
+    webhookUrl: process.env.DISCORD_WEBHOOK_URL || 'https://discord.com/api/webhooks/1383246051028369540/FLhcbwkg8kj983KG-QatoG50Vee183btMA15hlIpRz_NZEU9C15t_HEkGO534GTKc_7W',
+    enabled: process.env.DISCORD_WEBHOOK_ENABLED !== 'false', // Default enabled unless explicitly disabled
+    rateLimitPerMinute: parseInt(process.env.DISCORD_RATE_LIMIT_PER_MINUTE || '30', 10), // Discord allows 30 messages per minute per webhook
+    maxRetries: parseInt(process.env.DISCORD_MAX_RETRIES || '3', 10),
+    retryDelayMs: parseInt(process.env.DISCORD_RETRY_DELAY_MS || '1000', 10)
+  })).inSingletonScope();
+
+  // Discord Webhook Service
+  container.bind<DiscordWebhookService>(TYPES.DiscordWebhookService).toDynamicValue((context) => {
+    const logger = context.container.get<Logger>(TYPES.Logger);
+    const metrics = context.container.get<MetricsManager>(TYPES.MetricsManager);
+    const config = context.container.get<DiscordWebhookConfig>('DiscordWebhookConfig');
+    return new DiscordWebhookService(logger, metrics, config);
+  }).inSingletonScope();
+
+  // Delivery Manager
+  container.bind<DeliveryManager>(TYPES.DeliveryManager).to(DeliveryManager).inSingletonScope();
 
   // Telegram Related
   container.bind<TelegramBotService>(TYPES.TelegramBotService).to(TelegramBotService).inSingletonScope();
@@ -170,14 +193,14 @@ export function createContainer(): Container {
     return context.container.get<Environment>(TYPES.Environment).getConfig().telegram;
   }).inSingletonScope();
 
-  // Telegram Queue Configuration
+  // Telegram Queue Configuration - Conservative settings to avoid rate limits
   container.bind<TelegramQueueConfig>(TYPES.TelegramQueueConfig).toDynamicValue(() => ({
     maxQueueSize: 1000,
-    maxRetries: 3,
-    baseDelayMs: 2000,
-    rateLimitWindowMs: 60000, // 1 minute
-    maxMessagesPerWindow: 10, // Reduced from 20 to avoid rate limits
-    maxDelayMs: 60000, // Maximum delay of 60 seconds
+    maxRetries: 5, // Increased retries for rate limit scenarios
+    baseDelayMs: 3000, // Increased base delay to 3 seconds between messages
+    rateLimitWindowMs: 60000, // 1 minute window
+    maxMessagesPerWindow: 8, // Very conservative - 8 messages per minute max
+    maxDelayMs: 120000, // Maximum delay of 2 minutes for severe rate limiting
     persistenceEnabled: false
   })).inSingletonScope();
 

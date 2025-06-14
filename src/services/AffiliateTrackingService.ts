@@ -4,7 +4,7 @@ import { TYPES } from '../types/di.js';
 import { ConfigService } from './ConfigService.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
 import { TwitterAffiliateService } from './TwitterAffiliateService.js';
-import { TelegramService } from './TelegramService.js';
+import { ITelegramMessageQueue } from '../types/telegram.js';
 import { AffiliateChange } from '../types/affiliates.js';
 
 @injectable()
@@ -16,7 +16,7 @@ export class AffiliateTrackingService {
     @inject(TYPES.ConfigService) private configService: ConfigService,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
     @inject(TYPES.TwitterAffiliateService) private twitterAffiliateService: TwitterAffiliateService,
-    @inject(TYPES.TelegramService) private telegramService: TelegramService
+    @inject(TYPES.TelegramMessageQueue) private telegramQueue: ITelegramMessageQueue
   ) {
     this.logger.setComponent('AffiliateTrackingService');
   }
@@ -76,8 +76,20 @@ export class AffiliateTrackingService {
         // Format changes into a message
         const message = this.formatAffiliateChanges(account, accountChanges);
         
-        // Send to Telegram
-        await this.telegramService.sendMessage(message, this.AFFILIATE_TOPIC_ID);
+        // Queue message to Telegram using the proper queue system
+        const telegramConfig = this.configService.getTelegramConfig();
+        await this.telegramQueue.queueMessage({
+          chatId: parseInt(telegramConfig.api.groupId),
+          threadId: this.AFFILIATE_TOPIC_ID,
+          content: message,
+          messageOptions: {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            disable_notification: false,
+            protect_content: false
+          },
+          priority: 2 // Higher priority for affiliate changes
+        });
         
         this.logger.info(`Reported ${accountChanges.length} affiliate changes for account ${account}`);
       }

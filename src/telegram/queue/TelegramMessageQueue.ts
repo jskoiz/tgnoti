@@ -23,6 +23,11 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
   private lastRateLimitTime: number = 0;
   private consecutiveRateLimits: number = 0;
   private backoffMultiplier: number = 1;
+  
+  // Metrics tracking
+  private totalProcessingTime: number = 0;
+  private processedMessageCount: number = 0;
+  private rateLimitHitCount: number = 0;
 
   constructor(
     @inject(TYPES.Logger) private logger: Logger,
@@ -74,12 +79,12 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
 
     return {
       queueLength: totalMessages,
-      processingTime: 0, // TODO: Implement processing time tracking
+      processingTime: this.processedMessageCount > 0 ? this.totalProcessingTime / this.processedMessageCount : 0,
       successRate: totalMessages > 0 ? (successfulMessages / totalMessages) * 100 : 100,
       failureRate: totalMessages > 0 ? (failedMessages / totalMessages) * 100 : 0,
-      rateLimitHits: 0, // TODO: Implement rate limit tracking
-      averageRetryCount: totalMessages > 0 
-        ? this.queue.reduce((sum, msg) => sum + msg.retryCount, 0) / totalMessages 
+      rateLimitHits: this.rateLimitHitCount,
+      averageRetryCount: totalMessages > 0
+        ? this.queue.reduce((sum, msg) => sum + msg.retryCount, 0) / totalMessages
         : 0
     };
   }
@@ -153,6 +158,7 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
     }
 
     this.isProcessing = true;
+    const processingStartTime = Date.now();
     
     // Apply the current delay before processing
     this.logger.debug(`Waiting ${this.currentDelay}ms before processing next message`);
@@ -183,12 +189,19 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
       
       if (result.success) {
         this.queue.shift();
+        
+        // Track processing time
+        const processingTime = Date.now() - processingStartTime;
+        this.totalProcessingTime += processingTime;
+        this.processedMessageCount++;
+        
         // Only mark as seen if both tweetId and threadId are present
         if (message.tweetId && message.threadId) {
           this.logger.info(`Message successfully sent to chat thread ID ${message.threadId}`, {
             tweetId: message.tweetId,
             messageId: message.id,
-            chatId: message.chatId
+            chatId: message.chatId,
+            processingTimeMs: processingTime
           });
           try {
             await this.storage.markSeen(message.tweetId, message.threadId.toString());
@@ -199,7 +212,7 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
         } else {
           this.logger.warn(`Cannot mark tweet as seen - missing data: tweetId=${message.tweetId}, threadId=${message.threadId}`);
         }
-        this.logger.debug(`Message ${message.id} sent successfully`);
+        this.logger.debug(`Message ${message.id} sent successfully in ${processingTime}ms`);
         
         // Gradually decrease delay on success if we've had rate limits before
         if (this.consecutiveRateLimits > 0) {
@@ -250,6 +263,7 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
     const now = Date.now();
     this.lastRateLimitTime = now;
     this.consecutiveRateLimits++;
+    this.rateLimitHitCount++; // Track rate limit hits
     
     // Extract retry-after value if available
     let retryAfter = 0;
@@ -257,38 +271,45 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
     if (match && match[1]) {
       retryAfter = parseInt(match[1], 10) * 1000; // Convert to milliseconds
       if (retryAfter > 0) {
-        const logMessage = `Message ID: ${message.id}, Retry count: ${message.retryCount}, Retry after: ${retryAfter/1000}s`;
-        this.logger.warn(`Rate limit hit, Telegram suggests waiting ${retryAfter/1000}s`, new Error(logMessage));
+        const logMessage = `Message ID: ${message.id}, Retry count: ${message.retryCount}, Telegram retry-after: ${retryAfter/1000}s`;
+        this.logger.warn(`Rate limit hit, Telegram requests waiting ${retryAfter/1000}s`, new Error(logMessage));
         
-        // Apply exponential backoff with the retry-after value as a minimum
-        this.increaseDelay(Math.max(retryAfter, this.currentDelay * 2));
+        // Use Telegram's suggested retry-after time plus a small buffer (10% extra)
+        const bufferTime = Math.max(1000, retryAfter * 0.1); // At least 1 second buffer
+        const totalDelay = retryAfter + bufferTime;
+        this.increaseDelay(totalDelay);
+        
+        this.logger.info(`Applied Telegram rate limit delay: ${totalDelay/1000}s (${retryAfter/1000}s + ${bufferTime/1000}s buffer)`);
         return;
       }
     }
     
-    // If no retry-after value found, use exponential backoff
-    this.increaseDelay();
+    // If no retry-after value found, use conservative exponential backoff
+    const conservativeDelay = Math.max(30000, this.currentDelay * 2); // At least 30 seconds
+    this.increaseDelay(conservativeDelay);
     
-    const logMessage = `Message ID: ${message.id}, Retry count: ${message.retryCount}, New delay: ${this.currentDelay}ms, Consecutive rate limits: ${this.consecutiveRateLimits}`;
-    this.logger.warn(`Rate limit hit, applying exponential backoff`, new Error(logMessage));
+    const logMessage = `Message ID: ${message.id}, Retry count: ${message.retryCount}, Applied conservative delay: ${conservativeDelay/1000}s, Consecutive rate limits: ${this.consecutiveRateLimits}`;
+    this.logger.warn(`Rate limit hit without retry-after, applying conservative backoff`, new Error(logMessage));
   }
   
   private increaseDelay(specificDelay?: number): void {
     if (specificDelay) {
-      this.currentDelay = specificDelay;
+      // Use the specific delay provided (usually from Telegram's retry-after)
+      this.currentDelay = Math.min(specificDelay, this.config.maxDelayMs);
     } else {
       // Exponential backoff: double the delay each time
-      const maxDelay = 60000; // Default max delay of 60 seconds
       this.currentDelay = Math.min(
         this.currentDelay * 2,
-        maxDelay
+        this.config.maxDelayMs
       );
     }
     this.backoffMultiplier = Math.min(this.backoffMultiplier * 2, 8);
     
-    this.logger.info(`Increased message sending delay`, {
-      newDelay: this.currentDelay,
-      backoffMultiplier: this.backoffMultiplier
+    this.logger.info(`Increased message sending delay to ${this.currentDelay/1000}s`, {
+      newDelayMs: this.currentDelay,
+      newDelaySeconds: this.currentDelay/1000,
+      backoffMultiplier: this.backoffMultiplier,
+      maxDelayMs: this.config.maxDelayMs
     });
   }
   
@@ -324,6 +345,13 @@ export class TelegramMessageQueue implements ITelegramMessageQueue {
     this.logger.debug(`Reset rate limit backoff`, {
       baseDelay: this.config.baseDelayMs
     });
+  }
+  
+  public resetMetrics(): void {
+    this.totalProcessingTime = 0;
+    this.processedMessageCount = 0;
+    this.rateLimitHitCount = 0;
+    this.logger.info('Queue metrics reset');
   }
   
   public clearRateLimitState(): void {

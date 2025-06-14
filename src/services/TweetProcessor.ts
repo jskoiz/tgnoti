@@ -6,8 +6,8 @@ import { StorageService } from './StorageService.js';
 import { ConfigService } from './ConfigService.js';
 import { TopicConfig } from '../config/unified.js';
 import { MetricsManager } from '../core/monitoring/MetricsManager.js';
-import { TelegramService } from '../services/TelegramService.js';
-import { TweetFormatter, TweetMessageConfig, FormattedMessage } from '../types/telegram.js';
+import { ITelegramMessageQueue, TweetFormatter, TweetMessageConfig, FormattedMessage, TweetMetadata } from '../types/telegram.js';
+import { DeliveryManager } from './DeliveryManager.js';
 
 // Default minimum number of substantive words required for a tweet to be considered substantive
 const DEFAULT_MIN_SUBSTANTIVE_WORDS = 4;
@@ -19,8 +19,9 @@ export class TweetProcessor {
     @inject(TYPES.StorageService) private storage: StorageService,
     @inject(TYPES.ConfigService) private config: ConfigService,
     @inject(TYPES.MetricsManager) private metrics: MetricsManager,
-    @inject(TYPES.TelegramService) private telegram: TelegramService,
-    @inject(TYPES.TweetFormatter) private tweetFormatter: TweetFormatter
+    @inject(TYPES.TelegramMessageQueue) private telegramQueue: ITelegramMessageQueue,
+    @inject(TYPES.TweetFormatter) private tweetFormatter: TweetFormatter,
+    @inject(TYPES.DeliveryManager) private deliveryManager: DeliveryManager
   ) {
     this.logger.setComponent('TweetProcessor');
   }
@@ -32,63 +33,157 @@ export class TweetProcessor {
     const username = tweet.tweetBy?.userName || 'unknown';
     
     try {
-      // Use debug level for individual tweet processing logs
-      this.logger.debug(`[TWEET PROCESSING START] Processing tweet ${tweetId} from @${username} for topic ${topic.name} (${topicId})`);
+      // Use info level for mass tracking to see what's happening
+      if (topic.id === 33763) {
+        this.logger.info(`[MASS TRACKING] Processing tweet ${tweetId} from @${username} (${tweet.createdAt})`);
+      } else {
+        this.logger.debug(`[TWEET PROCESSING START] Processing tweet ${tweetId} from @${username} for topic ${topic.name} (${topicId})`);
+      }
       
       // 1. Check if tweet is already processed (duplicate check)
       if (await this.isDuplicate(tweet, topicId)) {
-        this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} is a duplicate`);
+        if (topic.id === 33763) {
+          this.logger.info(`[MASS TRACKING] REJECTED - Tweet ${tweetId} from @${username} is a duplicate`);
+        } else {
+          this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} is a duplicate`);
+        }
         return false;
       }
       
       // 2. Validate tweet age
       if (!this.isWithinTimeWindow(tweet, topic.searchWindowMinutes)) {
-        const windowMinutes = topic.searchWindowMinutes || 
-          this.config.getTwitterConfig().searchWindow.windowMinutes || 60;
-        this.logger.debug(`Tweet ${tweetId} from @${username} outside time window of ${windowMinutes} minutes`);
-        this.metrics.increment('tweets.age_validation.failed');
-        this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} outside time window`);
-        return false;
-      } else {
-        const windowMinutes = topic.searchWindowMinutes || 
+        const windowMinutes = topic.searchWindowMinutes ||
           this.config.getTwitterConfig().searchWindow.windowMinutes || 60;
         const tweetDate = new Date(tweet.createdAt);
         const now = new Date();
         const diffMinutes = (now.getTime() - tweetDate.getTime()) / (1000 * 60);
-        this.logger.debug(`Tweet ${tweetId} from @${username} within time window: ${diffMinutes.toFixed(2)} minutes old, window: ${windowMinutes} minutes`);
+        
+        if (topic.id === 33763) {
+          this.logger.info(`[MASS TRACKING] REJECTED - Tweet ${tweetId} from @${username} outside time window: ${diffMinutes.toFixed(2)} minutes old, window: ${windowMinutes} minutes`);
+        } else {
+          this.logger.debug(`Tweet ${tweetId} from @${username} outside time window of ${windowMinutes} minutes`);
+        }
+        this.metrics.increment('tweets.age_validation.failed');
+        return false;
+      } else {
+        const windowMinutes = topic.searchWindowMinutes ||
+          this.config.getTwitterConfig().searchWindow.windowMinutes || 60;
+        const tweetDate = new Date(tweet.createdAt);
+        const now = new Date();
+        const diffMinutes = (now.getTime() - tweetDate.getTime()) / (1000 * 60);
+        
+        if (topic.id === 33763) {
+          this.logger.info(`[MASS TRACKING] PASSED - Tweet ${tweetId} from @${username} within time window: ${diffMinutes.toFixed(2)} minutes old, window: ${windowMinutes} minutes`);
+        } else {
+          this.logger.debug(`Tweet ${tweetId} from @${username} within time window: ${diffMinutes.toFixed(2)} minutes old, window: ${windowMinutes} minutes`);
+        }
       }
       
       // 3. Validate tweet content
       if (!this.validateTweet(tweet)) {
-        this.logger.debug(`Tweet ${tweetId} from @${username} failed validation`);
+        if (topic.id === 33763) {
+          this.logger.info(`[MASS TRACKING] REJECTED - Tweet ${tweetId} from @${username} failed validation`);
+        } else {
+          this.logger.debug(`Tweet ${tweetId} from @${username} failed validation`);
+        }
         this.metrics.increment('tweets.validation.failed');
-        this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} failed validation`);
         return false;
       }
       
       // 4. Check if tweet matches topic filters
       if (!this.matchesTopicFilters(tweet, topic)) {
-        this.logger.debug(`Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
+        if (topic.id === 33763) {
+          this.logger.info(`[MASS TRACKING] REJECTED - Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
+        } else {
+          this.logger.debug(`Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
+        }
         this.metrics.increment('tweets.filter.failed');
-        this.logger.debug(`[TWEET PROCESSING REJECTED] Tweet ${tweetId} from @${username} does not match filters for topic ${topic.name}`);
         return false;
       }
       
-      // 5. Format tweet for Telegram
-      const formattedMessage = this.formatTweet(tweet);
-      
-      // 6. Send to Telegram
-      this.logger.info(`Sending tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id})`);
-      try {
-        await this.telegram.sendMessage(formattedMessage, topic.id);
-        this.logger.info(`Successfully sent tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id})`);
-      } catch (sendError) {
-        this.logger.error(`Failed to send tweet ${tweetId} to Telegram:`, sendError instanceof Error ? sendError : new Error(String(sendError)));
-        throw sendError;
+      // 5. Check if this is MASS_TRACKING topic - use DeliveryManager for enhanced delivery
+      if (topic.id === 33763) { // MASS_TRACKING topic ID
+        this.logger.info(`Sending MASS_TRACKING tweet ${tweetId} from @${username} via DeliveryManager`);
+        try {
+          await this.deliveryManager.sendTweetNotification(tweet, topic);
+          this.logger.info(`Successfully sent MASS_TRACKING tweet ${tweetId} from @${username} via DeliveryManager`);
+          this.metrics.increment('tweets.delivery_manager.sent');
+        } catch (deliveryError) {
+          this.logger.error(`Failed to send MASS_TRACKING tweet ${tweetId} via DeliveryManager:`, deliveryError instanceof Error ? deliveryError : new Error(String(deliveryError)));
+          this.metrics.increment('tweets.delivery_manager.error');
+          throw deliveryError;
+        }
+      } else {
+        // 6. For other topics, format tweet for Telegram and use traditional queue system
+        const formattedMessage = this.formatTweet(tweet);
+        
+        // 7. Send to Telegram using the proper queue system
+        this.logger.info(`Queueing tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id})`);
+        try {
+        const telegramConfig = this.config.getTelegramConfig();
+        
+        // Create tweet metadata for the queue
+        const tweetMetadata: TweetMetadata = {
+          tweet: tweet,
+          matchedTopic: topic.name,
+          type: 'original' // Default type, could be enhanced to detect replies/quotes
+        };
+        
+        // Prepare message content and options based on formatted message type
+        let messageContent: string;
+        let messageOptions: any = {
+          parse_mode: telegramConfig.messageOptions.parse_mode,
+          disable_web_page_preview: telegramConfig.messageOptions.disable_web_page_preview,
+          disable_notification: false,
+          protect_content: false
+        };
+        
+        if (typeof formattedMessage === 'string') {
+          messageContent = formattedMessage;
+        } else {
+          // Handle FormattedMessage object
+          messageContent = formattedMessage.text || formattedMessage.caption || '';
+          if (formattedMessage.reply_markup) {
+            messageOptions.reply_markup = formattedMessage.reply_markup;
+          }
+          if (formattedMessage.parse_mode) {
+            messageOptions.parse_mode = formattedMessage.parse_mode;
+          }
+          if (formattedMessage.disable_web_page_preview !== undefined) {
+            messageOptions.disable_web_page_preview = formattedMessage.disable_web_page_preview;
+          }
+          
+          // Handle photo messages by including photo URL in text content
+          if (formattedMessage.photo) {
+            messageContent = `📸 ${messageContent}\n\nPhoto: ${formattedMessage.photo}`;
+          }
+        }
+        
+        // Queue the message with proper rate limiting
+        const messageId = await this.telegramQueue.queueMessage({
+          chatId: parseInt(telegramConfig.api.groupId),
+          threadId: topic.id,
+          tweetId: tweetId,
+          content: messageContent,
+          messageOptions: messageOptions,
+          tweetMetadata: tweetMetadata,
+          priority: 1 // Normal priority
+        });
+        
+        this.logger.info(`Successfully queued tweet ${tweetId} from @${username} to Telegram topic ${topic.name} (${topic.id}), message ID: ${messageId}`);
+        this.metrics.increment('telegram.messages.queued');
+        
+        // Note: markSeen is now handled by the TelegramMessageQueue after successful delivery
+        // But we still need to store the tweet in our database
+        } catch (sendError) {
+          this.logger.error(`Failed to queue tweet ${tweetId} for Telegram:`, sendError instanceof Error ? sendError : new Error(String(sendError)));
+          this.metrics.increment('telegram.messages.error');
+          throw sendError;
+        }
       }
       
-      // 7. Mark as processed
-      this.logger.info(`Marking tweet ${tweetId} as processed for topic ${topicId}`);
+      // 8. Mark as processed in our database (separate from delivery tracking)
+      this.logger.info(`Storing tweet ${tweetId} in database for topic ${topicId}`);
       await this.storage.storeTweet(tweet, topicId);
       
       const processingTime = Date.now() - startTime;
@@ -215,15 +310,24 @@ export class TweetProcessor {
 
   private matchesTopicFilters(tweet: Tweet, topic: TopicConfig): boolean {
     const username = tweet.tweetBy?.userName?.toLowerCase();
-    if (!username) return false;
+    if (!username) {
+      if (topic.id === 33763) {
+        this.logger.info(`[MASS TRACKING] FILTER - Tweet ${tweet.id} has no username`);
+      }
+      return false;
+    }
 
-    this.logger.debug(`Checking if tweet ${tweet.id} from @${username} matches filters for topic ${topic.name} (${topic.id})`);
-    if (topic.accounts) {
-      this.logger.debug(`Topic ${topic.name} has ${topic.accounts.length} accounts: ${topic.accounts.join(', ')}`);
+    if (topic.id === 33763) {
+      this.logger.info(`[MASS TRACKING] FILTER - Checking tweet ${tweet.id} from @${username} against ${topic.accounts?.length || 0} monitored accounts`);
+    } else {
+      this.logger.debug(`Checking if tweet ${tweet.id} from @${username} matches filters for topic ${topic.name} (${topic.id})`);
+      if (topic.accounts) {
+        this.logger.debug(`Topic ${topic.name} has ${topic.accounts.length} accounts: ${topic.accounts.join(', ')}`);
+      }
     }
     
     // Check if tweet is from one of the monitored accounts
-    if (topic.accounts && topic.accounts.some(account => 
+    if (topic.accounts && topic.accounts.some(account =>
       account.toLowerCase() === username)) {
       
       // For KOL monitoring topic (ID: 6531), apply special filtering
@@ -246,10 +350,18 @@ export class TweetProcessor {
         }
       }
       
-      this.logger.debug(`Tweet from @${username} matches account filter for topic ${topic.name}`);
+      if (topic.id === 33763) {
+        this.logger.info(`[MASS TRACKING] FILTER - Tweet from @${username} MATCHES account filter`);
+      } else {
+        this.logger.debug(`Tweet from @${username} matches account filter for topic ${topic.name}`);
+        this.logger.debug(`Tweet from @${username} MATCHES account filter for topic ${topic.name}`);
+      }
       this.metrics.increment('tweets.filter.match.user');
-      this.logger.debug(`Tweet from @${username} MATCHES account filter for topic ${topic.name}`);
       return true;
+    } else {
+      if (topic.id === 33763) {
+        this.logger.info(`[MASS TRACKING] FILTER - Tweet from @${username} NOT in monitored accounts list`);
+      }
     }
     
     // Check if tweet mentions one of the monitored accounts

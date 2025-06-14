@@ -83,6 +83,7 @@ export class EnhancedTweetMonitor {
     }
   }
   
+  
   /**
    * Persist monitor state to storage
    */
@@ -131,9 +132,9 @@ export class EnhancedTweetMonitor {
     
     // Use the smaller of the configured batch size or the maximum batch size
     // This ensures we don't exceed the recommended limit for reliable results
-    const batchSize = Math.min(configuredBatchSize, maxBatchSize);
+    let defaultBatchSize = Math.min(configuredBatchSize, maxBatchSize);
     
-    this.logger.info(`Using batch size of ${batchSize} accounts per query (max configured: ${maxBatchSize})`);
+    this.logger.info(`Using default batch size of ${defaultBatchSize} accounts per query (max configured: ${maxBatchSize})`);
 
     for (const topic of topics) {
       let accounts: string[] = [];
@@ -155,6 +156,9 @@ export class EnhancedTweetMonitor {
 
       const accountCount = accounts.length;
       const batches: string[][] = [];
+
+      // Use default batch size for all topics
+      let batchSize = defaultBatchSize;
 
       // Create batches of accounts, respecting the batch size limit
       while (accounts.length > 0) {
@@ -183,7 +187,41 @@ export class EnhancedTweetMonitor {
    */
   private initializeCircuitBreakers(): void {
     try {
-      // Create circuit breaker for Twitter API
+      // Create circuit breaker for Twitter Search API (more lenient for 404s)
+      const twitterSearchCB = new EnhancedCircuitBreaker(this.logger, {
+        threshold: 5, // Allow more 404s before opening
+        resetTimeout: 60000, // 1 minute reset for search issues
+        testInterval: 10000,
+        monitorInterval: 10000
+      });
+      
+      twitterSearchCB.setStateChangeCallback(() => {
+        this.persistState().catch(error => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.logger.error('Failed to persist state after circuit breaker state change', err);
+        });
+      });
+      
+      this.circuitBreakers.set('twitter_search', twitterSearchCB);
+      
+      // Create circuit breaker for Twitter Timeline API (stricter for rate limits)
+      const twitterTimelineCB = new EnhancedCircuitBreaker(this.logger, {
+        threshold: 2, // Stricter for rate limit errors
+        resetTimeout: 120000, // 2 minutes reset for rate limits
+        testInterval: 15000,
+        monitorInterval: 15000
+      });
+      
+      twitterTimelineCB.setStateChangeCallback(() => {
+        this.persistState().catch(error => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.logger.error('Failed to persist state after circuit breaker state change', err);
+        });
+      });
+      
+      this.circuitBreakers.set('twitter_timeline', twitterTimelineCB);
+      
+      // Keep the general Twitter API circuit breaker for backward compatibility
       const twitterCB = new EnhancedCircuitBreaker(this.logger, {
         threshold: 3,
         resetTimeout: 30000,
@@ -191,7 +229,6 @@ export class EnhancedTweetMonitor {
         monitorInterval: 5000
       });
       
-      // Set state change callback to persist state
       twitterCB.setStateChangeCallback(() => {
         this.persistState().catch(error => {
           const err = error instanceof Error ? error : new Error(String(error));
@@ -279,8 +316,14 @@ export class EnhancedTweetMonitor {
       let totalTweets = 0;
       let processedTweets = 0;
       
-      // Process each topic
+      // Process each topic (excluding MASS_TRACKING which runs separately)
       for (const topic of topics) {
+        // Skip MASS_TRACKING as it runs in its own process
+        if (topic.name === 'MASS_TRACKING') {
+          this.logger.info(`Skipping MASS_TRACKING topic (ID: ${topic.id}) - runs in separate process`);
+          continue;
+        }
+        
         // Check if we're in a global cooldown period from RettiwtErrorHandler
         if (this.rettiwtErrorHandler.isInCooldown()) {
           const remainingCooldown = Math.ceil(this.rettiwtErrorHandler.getRemainingCooldown() / 1000);
@@ -480,14 +523,15 @@ export class EnhancedTweetMonitor {
       
       this.logger.info(`Searching tweets for ${accounts.length} accounts in batch: ${accounts.join(', ')}`);
       
-      // Use circuit breaker for Twitter API calls
-      const twitterCB = this.circuitBreakers.get('twitter_api')!;
+      // Use appropriate circuit breakers for different operations
+      const searchCB = this.circuitBreakers.get('twitter_search')!;
+      const timelineCB = this.circuitBreakers.get('twitter_timeline')!;
       
       let tweets: any[] = [];
       
       try {
         // OPTIMIZED: Use a single search for all accounts in the batch
-        tweets = await twitterCB.execute(
+        tweets = await searchCB.execute(
           async () => {
             // Create a combined search for all accounts
             if (searchType === 'from') {
@@ -504,37 +548,50 @@ export class EnhancedTweetMonitor {
             (searchError.message.includes('404') ||
              (searchError as any)?.response?.status === 404)) {
           
-          this.logger.warn(`[FALLBACK] Batch search failed with 404 for topic ${topic.name}, trying individual account searches`);
+          this.logger.warn(`[FALLBACK] Batch search failed with 404 for topic ${topic.name}, trying individual timeline fallback`);
           
-          // Process each account individually
-          for (const account of accounts) {
+          // Use timeline fallback with proper circuit breaker and rate limiting
+          for (let i = 0; i < accounts.length; i++) {
+            const account = accounts[i];
+            
             try {
-              this.logger.info(`[FALLBACK] Searching tweets for individual account: ${account}`);
+              this.logger.info(`[TIMELINE FALLBACK] Getting timeline for account: ${account}`);
               
-              // Use the appropriate search method based on search type
-              const accountTweets = await twitterCB.execute(
+              // Add delay between timeline requests to avoid rate limits
+              if (i > 0) {
+                const delay = Math.min(5000, 2000 * i); // Progressive delay, max 5s
+                this.logger.debug(`Adding ${delay}ms delay before timeline request for ${account}`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              
+              // Use timeline circuit breaker for individual timeline requests
+              const accountTweets = await timelineCB.execute(
                 async () => {
-                  if (searchType === 'from') {
-                    return this.twitter.searchTweets(account, searchStartTime, 'from');
-                  } else {
-                    return this.twitter.searchTweets(account, searchStartTime, 'mention');
-                  }
+                  // Use the TwitterService individual search which has timeline fallback
+                  return this.twitter.searchTweets(account, searchStartTime, searchType);
                 },
-                `search:${topic.name}:individual`
+                `timeline:${topic.name}:${account}`
               );
               
               tweets.push(...accountTweets);
-              this.logger.info(`[FALLBACK] Found ${accountTweets.length} tweets for account ${account}`);
+              this.logger.info(`[TIMELINE FALLBACK] Found ${accountTweets.length} tweets for account ${account}`);
               
-              // Add a small delay between individual searches to avoid rate limiting
-              await new Promise(resolve => setTimeout(resolve, 1000));
             } catch (accountError) {
-              this.logger.error(`[FALLBACK] Error searching tweets for account ${account}:`,
-                accountError instanceof Error ? accountError : new Error(String(accountError)));
+              const isRateLimit = accountError instanceof Error &&
+                (accountError.message.includes('429') || accountError.message.includes('TOO_MANY_REQUESTS'));
+              
+              if (isRateLimit) {
+                this.logger.warn(`[TIMELINE FALLBACK] Rate limit hit for ${account}, skipping remaining accounts in this batch`);
+                // Break out of the loop to avoid hitting more rate limits
+                break;
+              } else {
+                this.logger.error(`[TIMELINE FALLBACK] Error getting timeline for account ${account}:`,
+                  accountError instanceof Error ? accountError : new Error(String(accountError)));
+              }
             }
           }
           
-          this.logger.info(`[FALLBACK] Individual searches found a total of ${tweets.length} tweets for ${accounts.length} accounts`);
+          this.logger.info(`[TIMELINE FALLBACK] Found a total of ${tweets.length} tweets for ${accounts.length} accounts`);
         } else {
           // For other errors, rethrow
           throw searchError;
@@ -544,11 +601,41 @@ export class EnhancedTweetMonitor {
       this.logger.info(`Found ${tweets.length} tweets for batch of ${accounts.length} accounts`);
       totalTweetsFound += tweets.length;
       
-      // Process tweets
-      for (const tweet of tweets) {
-        const processed = await this.processor.processTweet(tweet, topic);
-        if (processed) {
-          totalTweetsProcessed++;
+      // Process tweets in parallel with controlled concurrency
+      const CONCURRENT_PROCESSING_LIMIT = 5; // Process up to 5 tweets simultaneously
+      const tweetBatches: any[][] = [];
+      
+      // Split tweets into smaller batches for parallel processing
+      for (let i = 0; i < tweets.length; i += CONCURRENT_PROCESSING_LIMIT) {
+        tweetBatches.push(tweets.slice(i, i + CONCURRENT_PROCESSING_LIMIT));
+      }
+      
+      this.logger.info(`Processing ${tweets.length} tweets in ${tweetBatches.length} parallel batches of up to ${CONCURRENT_PROCESSING_LIMIT} tweets each`);
+      
+      // Process each batch of tweets in parallel
+      for (const tweetBatch of tweetBatches) {
+        const processingPromises = tweetBatch.map(async (tweet) => {
+          try {
+            return await this.processor.processTweet(tweet, topic);
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            this.logger.error(`Error processing tweet ${tweet.id}:`, err);
+            return false;
+          }
+        });
+        
+        // Wait for all tweets in this batch to complete
+        const results = await Promise.all(processingPromises);
+        
+        // Count successful processing
+        const successCount = results.filter(result => result === true).length;
+        totalTweetsProcessed += successCount;
+        
+        this.logger.debug(`Processed batch of ${tweetBatch.length} tweets: ${successCount} successful`);
+        
+        // Add small delay between parallel batches to avoid overwhelming the system
+        if (tweetBatches.indexOf(tweetBatch) < tweetBatches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between batches
         }
       }
       

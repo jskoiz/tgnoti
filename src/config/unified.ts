@@ -101,8 +101,13 @@ function convertTopicConfig(): TopicConfig[] {
 
     // For KOL_MONITORING, ensure we're explicitly setting up to monitor tweets FROM these accounts
     if (name === 'KOL_MONITORING') {
-      // Log the KOL accounts we're monitoring for clarity
-      console.log(`KOL_MONITORING configured to track tweets FROM: ${userFilters.join(', ')}`);
+      // KOL_MONITORING configured to track tweets FROM these accounts
+    }
+
+    // For MASS_TRACKING, we'll populate accounts dynamically from CSV
+    if (name === 'MASS_TRACKING') {
+      topic.accounts = []; // Will be populated by CsvAccountLoader
+      // MASS_TRACKING topic configured with ID ${details.id} - accounts will be loaded from CSV
     }
 
     topicMap.set(details.id, topic);

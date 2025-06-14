@@ -18,6 +18,11 @@
     "log-viewer": "NODE_NO_WARNINGS=1 SHOW_DASHBOARD=true nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
     "tweet-analysis": "NODE_NO_WARNINGS=1 tsx tools/run-tweet-analysis.ts",
     "build-dashboard": "NODE_NO_WARNINGS=1 tsx tools/build-dashboard-client.ts",
+    "test-mass-tracking": "NODE_NO_WARNINGS=1 tsx tools/test-mass-tracking.ts",
+    "mass-tracking": "NODE_NO_WARNINGS=1 tsx tools/mass-tracking-service.ts",
+    "test-discord": "NODE_NO_WARNINGS=1 tsx tools/test-discord-webhook.ts",
+    "test-production-flow": "NODE_NO_WARNINGS=1 tsx tools/test-mass-tracking-discord.ts",
+    "monitor-queue": "NODE_NO_WARNINGS=1 tsx tools/queue-monitor.ts",
     "web": "(pkill -f 'tsx tools/start-dashboard.ts' || true) && (lsof -ti tcp:3000 | xargs kill -9 || true) && (pkill -f \"node --loader ts-node/esm\" || true) && (pkill -f nodemon || true) && rm -f telegram-bot.lock && npm run build-dashboard && NODE_NO_WARNINGS=1 tsx tools/start-dashboard.ts"
   },
   "keywords": [
